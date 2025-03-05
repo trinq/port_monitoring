@@ -64,6 +64,7 @@ class PortMonitor:
         # Initialize state tracking
         self.current_scan_id = None
         self.scan_in_progress = False
+        self.individual_ip_alerts = self.config.getboolean('Notification', 'individual_ip_alerts', fallback=True)
         self.load_state()
         
     def load_config(self):
@@ -77,6 +78,7 @@ class PortMonitor:
             self.history_dir = os.path.join(self.output_dir, 'history')
             self.scan_interval = self.config.getint('Scan', 'scan_interval_minutes', fallback=240) * 60
             self.notification_enabled = self.config.getboolean('Notification', 'enabled', fallback=True)
+            self.individual_ip_alerts = self.config.getboolean('Notification', 'individual_ip_alerts', fallback=True)
             
             # Reliability configuration
             self.max_retries = self.config.getint('Reliability', 'max_retries', fallback=3)
@@ -95,6 +97,7 @@ class PortMonitor:
             self.history_dir = os.path.join(self.output_dir, 'history')
             self.scan_interval = 240 * 60
             self.notification_enabled = True
+            self.individual_ip_alerts = True
             self.max_retries = 3
             self.retry_delay_base = 60
             self.verification_enabled = True
@@ -182,6 +185,204 @@ class PortMonitor:
         self.current_scan_id = None
         self.save_state()
         
+    def send_ip_scanned_notification(self, ip, scan_data):
+        """Send notification that an IP has been scanned"""
+        if not self.notification_enabled or not self.individual_ip_alerts:
+            return
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ports_info = {}
+        
+        # Format the port information
+        if scan_data and 'ports' in scan_data:
+            ports_info = scan_data['ports']
+        
+        # Create a notification message
+        message = {
+            "ip_scan": {
+                "ip": ip,
+                "timestamp": timestamp,
+                "port_count": len(ports_info),
+                "ports": ports_info
+            }
+        }
+        
+        try:
+            # Email notification
+            if self.config.getboolean('Email', 'enabled', fallback=False):
+                self._send_ip_scan_email(ip, message["ip_scan"])
+            
+            # Slack notification
+            if self.config.getboolean('Slack', 'enabled', fallback=False):
+                self._send_ip_scan_slack(ip, message["ip_scan"])
+            
+            # Telegram notification
+            if self.config.getboolean('Telegram', 'enabled', fallback=False):
+                self._send_ip_scan_telegram(ip, message["ip_scan"])
+                
+            logger.info(f"Sent scan notification for IP {ip}")
+        except Exception as e:
+            logger.error(f"Error sending IP scan notification for {ip}: {e}")
+    
+    def _send_ip_scan_email(self, ip, scan_data):
+        """Send email notification for a scanned IP"""
+        smtp_server = self.config.get('Email', 'smtp_server')
+        smtp_port = self.config.getint('Email', 'smtp_port')
+        smtp_user = self.config.get('Email', 'smtp_user')
+        smtp_password = self.config.get('Email', 'smtp_password')
+        sender_email = self.config.get('Email', 'sender_email')
+        recipient_emails = self.config.get('Email', 'recipient_emails').split(',')
+        
+        if not (smtp_server and smtp_port and sender_email and recipient_emails):
+            return
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = ", ".join(recipient_emails)
+        msg['Subject'] = f"[PORT MONITOR] IP Scan Completed - {ip} - {scan_data['timestamp']}"
+        
+        # Create HTML body
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body {{ font-family: Arial, sans-serif; }}
+                table {{ border-collapse: collapse; width: 100%; margin-bottom: 20px; }}
+                th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
+                th {{ background-color: #f2f2f2; }}
+                .section {{ margin-top: 20px; margin-bottom: 10px; font-weight: bold; }}
+                .no-ports {{ color: #888; font-style: italic; }}
+            </style>
+        </head>
+        <body>
+            <h2>IP Scan Completed: {ip}</h2>
+            <p>Scan Time: {scan_data['timestamp']}</p>
+            
+            <div class='section'>Open Ports:</div>
+        """
+        
+        if scan_data['port_count'] > 0:
+            html += "<table><tr><th>Port</th><th>Service</th></tr>"
+            for port, service in scan_data['ports'].items():
+                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
+                html += f"<tr><td>{port}</td><td>{service_str.strip()}</td></tr>"
+            html += "</table>"
+        else:
+            html += "<div class='no-ports'>No open ports detected</div>"
+        
+        html += f"""
+            <p>System: {os.uname().nodename}</p>
+            <p>User: {os.environ.get('USER', 'unknown')}</p>
+        </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html, 'html'))
+        
+        # Send email
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                server = smtplib.SMTP(smtp_server, smtp_port)
+                server.ehlo()
+                server.starttls()
+                if smtp_user and smtp_password:
+                    server.login(smtp_user, smtp_password)
+                server.send_message(msg)
+                server.close()
+                break
+            except Exception as e:
+                logger.error(f"Failed to send IP scan email notification for {ip} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait before retrying
+    
+    def _send_ip_scan_slack(self, ip, scan_data):
+        """Send Slack notification for a scanned IP"""
+        webhook_url = self.config.get('Slack', 'webhook_url')
+        if not webhook_url:
+            return
+        
+        # Create message
+        text = f"*IP Scan Completed: {ip}*\n"
+        text += f"Scan Time: {scan_data['timestamp']}\n\n"
+        
+        text += "*Open Ports:*\n"
+        if scan_data['port_count'] > 0:
+            for port, service in scan_data['ports'].items():
+                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
+                text += f"• {port} - {service_str.strip()}\n"
+        else:
+            text += "• No open ports detected\n"
+        
+        # Send message
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    webhook_url,
+                    json={"text": text},
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    break
+                else:
+                    logger.error(f"Failed to send IP scan Slack notification for {ip} (attempt {attempt+1}/{max_retries}): {response.status_code}, {response.text}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)  # Wait before retrying
+            except Exception as e:
+                logger.error(f"Error sending IP scan Slack notification for {ip} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait before retrying
+    
+    def _send_ip_scan_telegram(self, ip, scan_data):
+        """Send Telegram notification for a scanned IP"""
+        bot_token = self.config.get('Telegram', 'bot_token')
+        chat_id = self.config.get('Telegram', 'chat_id')
+        
+        if not bot_token or not chat_id:
+            return
+        
+        # Create message
+        text = f"*IP Scan Completed: {ip}*\n"
+        text += f"Scan Time: {scan_data['timestamp']}\n\n"
+        
+        text += "*Open Ports:*\n"
+        if scan_data['port_count'] > 0:
+            for port, service in scan_data['ports'].items():
+                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
+                text += f"• {port} - {service_str.strip()}\n"
+        else:
+            text += "• No open ports detected\n"
+        
+        # Send message
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+                response = requests.post(
+                    url,
+                    json={
+                        "chat_id": chat_id,
+                        "text": text,
+                        "parse_mode": "Markdown"
+                    },
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    break
+                else:
+                    logger.error(f"Failed to send IP scan Telegram notification for {ip} (attempt {attempt+1}/{max_retries}): {response.status_code}, {response.text}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)  # Wait before retrying
+            except Exception as e:
+                logger.error(f"Error sending IP scan Telegram notification for {ip} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait before retrying
+    
     def run_scan(self):
         """Run nmap scan with retry mechanism and return the output file path"""
         if self.scan_in_progress:
@@ -433,6 +634,57 @@ class PortMonitor:
         except Exception as e:
             logger.error(f"Error during deep verification: {e}")
             return False
+    
+    def extract_scanned_ips(self, xml_file):
+        """Extract information about individual IPs from the scan results"""
+        try:
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            
+            ip_results = {}
+            for host in root.findall('./host'):
+                addr_elem = host.find('./address')
+                if addr_elem is None or addr_elem.get('addrtype') != 'ipv4':
+                    continue
+                    
+                ip = addr_elem.get('addr')
+                ip_results[ip] = {'ports': {}}
+                
+                # Get host status
+                status_elem = host.find('./status')
+                if status_elem is not None:
+                    ip_results[ip]['status'] = status_elem.get('state')
+                else:
+                    ip_results[ip]['status'] = 'unknown'
+                
+                # Process ports
+                for port in host.findall('./ports/port'):
+                    port_id = port.get('portid')
+                    protocol = port.get('protocol')
+                    
+                    state_elem = port.find('state')
+                    if state_elem is None or state_elem.get('state') != 'open':
+                        continue
+                        
+                    service_info = {
+                        'state': state_elem.get('state'),
+                        'reason': state_elem.get('reason')
+                    }
+                    
+                    service_elem = port.find('service')
+                    if service_elem is not None:
+                        service_info['name'] = service_elem.get('name', '')
+                        service_info['product'] = service_elem.get('product', '')
+                        service_info['version'] = service_elem.get('version', '')
+                        service_info['extrainfo'] = service_elem.get('extrainfo', '')
+                    
+                    key = f"{port_id}/{protocol}"
+                    ip_results[ip]['ports'][key] = service_info
+            
+            return ip_results
+        except Exception as e:
+            logger.error(f"Error extracting IP information from scan: {e}")
+            return {}
     
     def parse_scan_results(self, xml_file):
         """Parse nmap XML output and return structured data"""
@@ -847,6 +1099,16 @@ if __name__ == "__main__":
         try:
             xml_file = monitor.run_scan()
             if xml_file:
+                # Process individual IP scan results if enabled
+                if monitor.individual_ip_alerts:
+                    # Extract individual IP data from the scan results
+                    ip_results = monitor.extract_scanned_ips(xml_file)
+                    
+                    # Send notifications for each scanned IP
+                    for ip, scan_data in ip_results.items():
+                        monitor.send_ip_scanned_notification(ip, scan_data)
+                
+                # Continue with existing functionality to detect changes
                 current_scan = monitor.parse_scan_results(xml_file)
                 previous_scan_file = monitor.get_latest_history_file()
                 if previous_scan_file:
