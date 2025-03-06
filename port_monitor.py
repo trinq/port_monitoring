@@ -185,6 +185,67 @@ class PortMonitor:
         self.current_scan_id = None
         self.save_state()
         
+    def send_ip_scan_started_notification(self, ip, attempt, max_retries):
+        """Send notification that scanning an IP has started"""
+        logger.info(f"Attempting to send scan start notification for IP {ip} (attempt {attempt}/{max_retries})")
+        
+        if not self.notification_enabled:
+            logger.info(f"Notifications are disabled, skipping scan start alert for IP {ip}")
+            return
+            
+        if not self.individual_ip_alerts:
+            logger.info(f"Individual IP alerts are disabled, skipping scan start alert for IP {ip}")
+            return
+        
+        # Only send start notifications if debug is enabled in config
+        if not self.config.getboolean('Notification', 'send_scan_start_alerts', fallback=False):
+            logger.debug(f"Scan start alerts are disabled in config, skipping for IP {ip}")
+            return
+            
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create a notification message
+        message = {
+            "scan_started": {
+                "timestamp": timestamp,
+                "ip": ip,
+                "attempt": attempt,
+                "max_retries": max_retries
+            }
+        }
+        
+        try:
+            notification_sent = False
+            
+            # Email notification
+            if self.config.getboolean('Email', 'enabled', fallback=False):
+                logger.info(f"Sending scan start email notification for IP {ip}")
+                subject = f"[PORT MONITOR] Scan Started for {ip} - {timestamp}"
+                body = f"Scan started for IP: {ip} (Attempt {attempt}/{max_retries})\n\nTimestamp: {timestamp}"
+                self._send_simple_email(subject, body)
+                notification_sent = True
+            
+            # Slack notification
+            if self.config.getboolean('Slack', 'enabled', fallback=False):
+                logger.info(f"Sending scan start Slack notification for IP {ip}")
+                slack_text = f":satellite_antenna: *Scan started for IP: {ip}*\n>Attempt {attempt}/{max_retries}\n>Timestamp: {timestamp}"
+                self._send_simple_slack(slack_text)
+                notification_sent = True
+            
+            # Telegram notification
+            if self.config.getboolean('Telegram', 'enabled', fallback=False):
+                logger.info(f"Sending scan start Telegram notification for IP {ip}")
+                telegram_text = f"🛰 *Scan started for IP: {ip}*\n\nAttempt {attempt}/{max_retries}\nTimestamp: {timestamp}"
+                self._send_simple_telegram(telegram_text)
+                notification_sent = True
+                
+            if notification_sent:
+                logger.info(f"Successfully sent scan start notification for IP {ip}")
+            else:
+                logger.debug(f"No scan start notifications were sent for IP {ip} - all notification channels are disabled")
+        except Exception as e:
+            logger.error(f"Error sending scan start notification for {ip}: {e}")
+    
     def send_ip_scanned_notification(self, ip, scan_data):
         """Send notification that an IP has been scanned"""
         logger.info(f"Attempting to send notification for IP {ip}")
@@ -411,6 +472,92 @@ class PortMonitor:
                 logger.error(f"Error sending IP scan Telegram notification for {ip} (attempt {attempt+1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
                     time.sleep(5)  # Wait before retrying
+    
+    def _send_simple_email(self, subject, body):
+        """Send a simple email notification with custom subject and body"""
+        try:
+            if not self.config.getboolean('Email', 'enabled', fallback=False):
+                return
+                
+            # Get email configuration
+            smtp_server = self.config.get('Email', 'smtp_server')
+            smtp_port = self.config.getint('Email', 'smtp_port')
+            sender_email = self.config.get('Email', 'sender_email')
+            recipient_emails = [email.strip() for email in self.config.get('Email', 'recipient_emails').split(',')]
+            use_tls = self.config.getboolean('Email', 'use_tls', fallback=True)
+            smtp_username = self.config.get('Email', 'smtp_username', fallback=None)
+            smtp_password = self.config.get('Email', 'smtp_password', fallback=None)
+            
+            # Create a simple email message
+            msg = MIMEMultipart()
+            msg['From'] = sender_email
+            msg['To'] = ", ".join(recipient_emails)
+            msg['Subject'] = subject
+            msg.attach(MIMEText(body, 'plain'))
+            
+            # Send the email
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                if use_tls:
+                    server.starttls()
+                if smtp_username and smtp_password:
+                    server.login(smtp_username, smtp_password)
+                server.send_message(msg)
+                
+        except Exception as e:
+            logger.error(f"Error sending simple email: {e}")
+    
+    def _send_simple_slack(self, message_text):
+        """Send a simple Slack notification with custom text"""
+        try:
+            if not self.config.getboolean('Slack', 'enabled', fallback=False):
+                return
+                
+            # Get Slack configuration
+            webhook_url = self.config.get('Slack', 'webhook_url')
+            
+            # Prepare payload
+            payload = {
+                "text": message_text
+            }
+            
+            # Send the notification
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Error sending Slack notification: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            logger.error(f"Error sending simple Slack notification: {e}")
+    
+    def _send_simple_telegram(self, message_text):
+        """Send a simple Telegram notification with custom text"""
+        try:
+            if not self.config.getboolean('Telegram', 'enabled', fallback=False):
+                return
+                
+            # Get Telegram configuration
+            bot_token = self.config.get('Telegram', 'bot_token')
+            chat_id = self.config.get('Telegram', 'chat_id')
+            
+            # Send the notification
+            api_url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": message_text,
+                "parse_mode": "Markdown"
+            }
+            
+            response = requests.post(api_url, json=payload)
+            
+            if response.status_code != 200:
+                logger.error(f"Error sending Telegram notification: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            logger.error(f"Error sending simple Telegram notification: {e}")
     
     def run_scan(self):
         """Run nmap scan with retry mechanism and return the output file path"""
@@ -655,6 +802,10 @@ class PortMonitor:
                 attempt += 1
                 try:
                     logger.debug(f"Starting scan for IP {ip} (attempt {attempt}/{self.max_retries})")
+                    
+                    # Send notification that scan is starting for this IP
+                    self.send_ip_scan_started_notification(ip, attempt, self.max_retries)
+                    
                     process = subprocess.Popen(
                         ip_cmd,
                         stdout=subprocess.PIPE,
