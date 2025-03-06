@@ -424,6 +424,10 @@ class PortMonitor:
         self.scan_in_progress = True
         self.save_state()
         
+        # Create temp directory for individual IP results
+        ip_results_dir = os.path.join(self.output_dir, 'tmp', f"scan_{timestamp}")
+        Path(ip_results_dir).mkdir(parents=True, exist_ok=True)
+        
         xml_output = os.path.join(self.output_dir, f"scan_{timestamp}.xml")
         normal_output = os.path.join(self.output_dir, f"scan_{timestamp}.txt")
         
@@ -442,20 +446,37 @@ class PortMonitor:
                 "--script-args", self.config.get('Scan', 'http_user_agent', fallback="Mozilla/5.0")
             ])
         
-        # Add remaining parameters
-        cmd.extend([
-            "-p", self.config.get('Scan', 'ports', fallback="1-1000"),
-            "--stats-every", "10s",
-            "-oX", xml_output,
-            "-oN", normal_output,
-            "-v",
-            "-iL", self.ip_list_file
-        ])
+        # Modified: Use per-IP scan mode if individual alerts are enabled
+        if self.individual_ip_alerts:
+            ip_list = self._load_ip_list()
+            logger.info(f"Individual IP alerts enabled: will scan {len(ip_list)} IPs separately")
+            
+            # Add remaining parameters but don't include the IP list file
+            cmd.extend([
+                "-p", self.config.get('Scan', 'ports', fallback="1-1000"),
+                "--stats-every", "10s",
+                "-v"
+            ])
+        else:
+            # Standard mode: scan all IPs at once
+            cmd.extend([
+                "-p", self.config.get('Scan', 'ports', fallback="1-1000"),
+                "--stats-every", "10s",
+                "-oX", xml_output,
+                "-oN", normal_output,
+                "-v",
+                "-iL", self.ip_list_file
+            ])
         
         # Run scan with retry logic
         success = False
         attempt = 0
         
+        # If using individual IP scans, handle differently
+        if self.individual_ip_alerts:
+            return self._run_individual_ip_scans(timestamp, cmd, ip_results_dir)
+        
+        # Standard scan mode for all IPs at once
         while not success and attempt < self.max_retries and not SHUTDOWN_REQUESTED:
             attempt += 1
             logger.info(f"Starting nmap scan (attempt {attempt}/{self.max_retries}) with command: {' '.join(cmd)}")
@@ -575,6 +596,150 @@ class PortMonitor:
         except Exception as e:
             logger.error(f"Error during scan verification: {e}")
             return False
+    
+    def _load_ip_list(self):
+        """Load list of IPs to scan from file"""
+        # Load the list of IPs to scan
+        try:
+            with open(self.ip_list_file, 'r') as f:
+                ips_to_scan = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+            logger.info(f"Loaded {len(ips_to_scan)} IPs from {self.ip_list_file}")
+            return ips_to_scan
+        except Exception as e:
+            logger.error(f"Error loading IP list: {e}")
+            return []
+            
+    def _run_individual_ip_scans(self, timestamp, base_cmd, ip_results_dir):
+        """Run separate scans for each IP and process results immediately"""
+        logger.info("Starting individual IP scans with immediate alerts")
+        
+        ip_list = self._load_ip_list()
+        if not ip_list:
+            logger.error("No IPs to scan")
+            return None
+            
+        successful_scans = 0
+        main_xml_file = os.path.join(self.output_dir, f"scan_{timestamp}.xml")
+        
+        # Create a root XML for the combined results
+        combined_root = ET.Element('nmaprun')
+        combined_root.set('scanner', 'nmap')
+        combined_root.set('start', str(int(time.time())))
+        combined_root.set('version', '7.80')
+        combined_tree = ET.ElementTree(combined_root)
+        
+        # Process each IP individually
+        for ip_index, ip in enumerate(ip_list):
+            if SHUTDOWN_REQUESTED:
+                logger.warning("Shutdown requested, stopping IP scans")
+                break
+                
+            ip_xml_file = os.path.join(ip_results_dir, f"{ip.replace('.', '_')}.xml")
+            ip_normal_file = os.path.join(ip_results_dir, f"{ip.replace('.', '_')}.txt")
+            
+            # Create the IP-specific command
+            ip_cmd = base_cmd.copy()
+            ip_cmd.extend([
+                "-oX", ip_xml_file,
+                "-oN", ip_normal_file,
+                ip
+            ])
+            
+            logger.info(f"Scanning IP {ip_index+1}/{len(ip_list)}: {ip}")
+            
+            # Run the scan for this IP
+            attempt = 0
+            ip_success = False
+            
+            while not ip_success and attempt < self.max_retries and not SHUTDOWN_REQUESTED:
+                attempt += 1
+                try:
+                    logger.debug(f"Starting scan for IP {ip} (attempt {attempt}/{self.max_retries})")
+                    process = subprocess.Popen(
+                        ip_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        universal_newlines=True
+                    )
+                    
+                    # Wait for the process to complete
+                    stdout, stderr = process.communicate()
+                    
+                    if process.returncode == 0:
+                        logger.info(f"Scan completed successfully for IP {ip}")
+                        ip_success = True
+                        successful_scans += 1
+                        
+                        # Process this IP's results immediately
+                        try:
+                            if os.path.exists(ip_xml_file) and os.path.getsize(ip_xml_file) > 0:
+                                # Extract the scan results for this IP
+                                ip_scan_data = self.extract_scanned_ips(ip_xml_file)
+                                
+                                # Send notifications for this IP
+                                if ip in ip_scan_data:
+                                    logger.info(f"Sending immediate notification for {ip}")
+                                    self.send_ip_scanned_notification(ip, ip_scan_data[ip])
+                                else:
+                                    logger.warning(f"IP {ip} not found in scan results")
+                                    
+                                # Add this IP's results to the combined XML
+                                try:
+                                    ip_tree = ET.parse(ip_xml_file)
+                                    ip_root = ip_tree.getroot()
+                                    for host in ip_root.findall('./host'):
+                                        combined_root.append(host)
+                                except Exception as e:
+                                    logger.error(f"Error merging XML for IP {ip}: {e}")
+                            else:
+                                logger.warning(f"Scan file for IP {ip} is missing or empty")
+                        except Exception as e:
+                            logger.error(f"Error processing scan results for IP {ip}: {e}")
+                    else:
+                        logger.error(f"Scan for IP {ip} failed with return code {process.returncode}")
+                        logger.error(f"STDOUT: {stdout}")
+                        logger.error(f"STDERR: {stderr}")
+                        
+                        # Retry with delay if not the last attempt
+                        if attempt < self.max_retries:
+                            delay = self.retry_delay_base * (2 ** (attempt - 1)) + random.uniform(0, self.retry_delay_base)
+                            logger.info(f"Retrying IP {ip} scan in {delay:.1f} seconds...")
+                            time.sleep(delay)
+                            
+                except Exception as e:
+                    logger.error(f"Exception during scan of IP {ip}: {e}")
+                    # Retry with delay if not the last attempt
+                    if attempt < self.max_retries and not SHUTDOWN_REQUESTED:
+                        delay = self.retry_delay_base * (2 ** (attempt - 1)) + random.uniform(0, self.retry_delay_base)
+                        logger.info(f"Retrying IP {ip} scan in {delay:.1f} seconds...")
+                        time.sleep(delay)
+        
+        # Save the combined results
+        logger.info(f"Completed individual scans of {successful_scans}/{len(ip_list)} IPs")
+        
+        # Write the combined XML file
+        try:
+            combined_root.set('end', str(int(time.time())))
+            combined_tree.write(main_xml_file)
+            logger.info(f"Saved combined scan results to {main_xml_file}")
+            
+            # Mark scan as complete
+            self.scan_in_progress = False
+            self.save_state()
+            
+            if successful_scans > 0:
+                # Also copy to history directory
+                history_file = os.path.join(self.history_dir, f"scan_{timestamp}.xml")
+                shutil.copy2(main_xml_file, history_file)
+                return main_xml_file
+            else:
+                logger.error("No IPs were successfully scanned")
+                return None
+        except Exception as e:
+            logger.error(f"Error saving combined scan results: {e}")
+            self.scan_in_progress = False
+            self.save_state()
+            return None
     
     def perform_deep_verification(self, xml_file):
         """Perform a deeper verification by directly checking a sample of ports"""
@@ -1182,8 +1347,9 @@ if __name__ == "__main__":
         try:
             xml_file = monitor.run_scan()
             if xml_file:
-                # Process individual IP scan results if enabled
-                if monitor.individual_ip_alerts:
+                # For standard scan mode, process IP alerts if needed
+                # (In individual scan mode, alerts are already sent during the scan)
+                if monitor.individual_ip_alerts and not hasattr(monitor, '_run_individual_ip_scans'):
                     logger.info("Individual IP alerts are enabled, processing IP scan results")
                     
                     # Extract individual IP data from the scan results
@@ -1197,7 +1363,7 @@ if __name__ == "__main__":
                     # Send notifications for each scanned IP
                     for ip, scan_data in ip_results.items():
                         monitor.send_ip_scanned_notification(ip, scan_data)
-                else:
+                elif not monitor.individual_ip_alerts:
                     logger.info("Individual IP alerts are disabled in configuration")
                 
                 # Continue with existing functionality to detect changes
