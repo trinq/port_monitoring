@@ -239,6 +239,13 @@ class PortMonitor:
                 self._send_simple_telegram(telegram_text)
                 notification_sent = True
                 
+            # Microsoft Teams notification
+            if self.config.getboolean('Teams', 'enabled', fallback=False):
+                logger.info(f"Sending scan start Teams notification for IP {ip}")
+                teams_text = f"🛰 **Scan started for IP: {ip}**\n\nAttempt {attempt}/{max_retries}\nTimestamp: {timestamp}"
+                self._send_simple_teams(teams_text)
+                notification_sent = True
+                
             if notification_sent:
                 logger.info(f"Successfully sent scan start notification for IP {ip}")
             else:
@@ -306,6 +313,14 @@ class PortMonitor:
                 notification_sent = True
             else:
                 logger.info("Telegram notifications disabled in config")
+                
+            # Microsoft Teams notification
+            if self.config.getboolean('Teams', 'enabled', fallback=False):
+                logger.info(f"Sending Teams notification for IP {ip}")
+                self._send_ip_scan_teams(ip, message["ip_scan"])
+                notification_sent = True
+            else:
+                logger.info("Teams notifications disabled in config")
                 
             if notification_sent:
                 logger.info(f"Successfully sent scan notification for IP {ip}")
@@ -558,6 +573,69 @@ class PortMonitor:
                 
         except Exception as e:
             logger.error(f"Error sending simple Telegram notification: {e}")
+            
+    def _send_simple_teams(self, message_text):
+        """Send a simple Microsoft Teams notification with custom text"""
+        try:
+            if not self.config.getboolean('Teams', 'enabled', fallback=False):
+                return
+                
+            # Get Teams webhook configuration
+            webhook_url = self.config.get('Teams', 'webhook_url')
+            
+            # Prepare payload
+            payload = {
+                "text": message_text
+            }
+            
+            # Send the notification
+            response = requests.post(webhook_url, json=payload, headers={'Content-Type': 'application/json'})
+            
+            if response.status_code != 200:
+                logger.error(f"Error sending Teams notification: {response.status_code} - {response.text}")
+                
+        except Exception as e:
+            logger.error(f"Error sending simple Teams notification: {e}")
+            
+    def _send_ip_scan_teams(self, ip, scan_data):
+        """Send Microsoft Teams notification for a scanned IP"""
+        webhook_url = self.config.get('Teams', 'webhook_url')
+        if not webhook_url:
+            return
+        
+        # Create message
+        text = f"**IP Scan Completed: {ip}**\n\n"
+        text += f"Scan Time: {scan_data['timestamp']}\n\n"
+        
+        text += "**Open Ports:**\n"
+        if scan_data['port_count'] > 0:
+            for port, service in scan_data['ports'].items():
+                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
+                text += f"• {port} - {service_str.strip()}\n"
+        else:
+            text += "• No open ports detected\n"
+        
+        # Send message
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    webhook_url,
+                    json={"text": text},
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    break
+                else:
+                    logger.error(f"Failed to send IP scan Teams notification for {ip} (attempt {attempt+1}/{max_retries}): {response.status_code}, {response.text}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)  # Wait before retrying
+            except Exception as e:
+                logger.error(f"Error sending IP scan Teams notification for {ip} (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait before retrying
     
     def run_scan(self):
         """Run nmap scan with retry mechanism and return the output file path"""
@@ -1447,6 +1525,84 @@ class PortMonitor:
         text += f"\nScan Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
         return text
+        
+    def _format_changes_for_teams(self, changes):
+        """Format changes for Microsoft Teams notification"""
+        text = "**Port Monitoring Alert**\n\n"
+        text += "The following changes were detected in the latest scan:\n\n"
+        
+        # New hosts
+        text += "**New Hosts Detected:**\n"
+        if changes["new_hosts"]:
+            for host, data in changes["new_hosts"].items():
+                ports_str = ", ".join(data["ports"].keys())
+                text += f"• {host} - Ports: {ports_str}\n"
+        else:
+            text += "• None\n"
+        
+        # New ports
+        text += "\n**New Open Ports:**\n"
+        if changes["new_ports"]:
+            for host, ports in changes["new_ports"].items():
+                for port, service in ports.items():
+                    service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
+                    text += f"• {host} - {port} ({service_str.strip()})\n"
+        else:
+            text += "• None\n"
+        
+        # Closed ports
+        text += "\n**Closed Ports:**\n"
+        if changes["closed_ports"]:
+            for host, ports in changes["closed_ports"].items():
+                if "all" in ports:
+                    text += f"• {host} - All ports (host down)\n"
+                else:
+                    for port in ports:
+                        if port != "all":
+                            text += f"• {host} - {port}\n"
+        else:
+            text += "• None\n"
+        
+        # Add scan information
+        text += f"\nScan Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        
+        return text
+    
+    def send_teams_notification(self, changes):
+        """Send Microsoft Teams notification with changes"""
+        if not self.config.getboolean('Teams', 'enabled', fallback=False):
+            return
+        
+        webhook_url = self.config.get('Teams', 'webhook_url')
+        if not webhook_url:
+            logger.error("Teams webhook URL not configured, cannot send notification")
+            return
+        
+        message = self._format_changes_for_teams(changes)
+        
+        # Implement retry logic for Teams notification
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(
+                    webhook_url,
+                    json={"text": message},
+                    headers={"Content-Type": "application/json"},
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    logger.info("Teams notification sent successfully")
+                    break
+                else:
+                    logger.error(f"Failed to send Teams notification (attempt {attempt+1}/{max_retries}): {response.status_code}, {response.text}")
+                    if attempt < max_retries - 1:
+                        time.sleep(5)  # Wait before retrying
+            except Exception as e:
+                logger.error(f"Error sending Teams notification (attempt {attempt+1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)  # Wait before retrying
+                else:
+                    logger.error("Maximum Teams retry attempts reached")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Port Monitor")
@@ -1532,6 +1688,7 @@ if __name__ == "__main__":
                     monitor.send_email_notification(changes)
                     monitor.send_slack_notification(changes)
                     monitor.send_telegram_notification(changes)
+                    monitor.send_teams_notification(changes)
                 else:
                     logger.info("No changes detected")
         except Exception as e:
