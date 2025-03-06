@@ -1,17 +1,20 @@
 # Port Monitoring System
 
-This is a 24/7 port monitoring solution that performs regular port scans on a list of IP addresses, compares results with historical data, and alerts on changes such as newly opened ports.
+This is a 24/7 port monitoring solution that performs regular port scans on a list of IP addresses, compares results with historical data, and alerts on changes such as newly opened ports. The system also provides real-time alerts for each IP address as it's scanned.
 
 ## Features
 
 - Continuous port scanning based on configurable intervals
+- **Real-time alerts for each IP as it's scanned**
+- **Optional scan start notifications for tracking scan progress**
 - Detection of new hosts, new open ports, and closed ports
 - Email, Slack, and Telegram notifications for detected changes
 - Historical data storage for comparison
 - Configurable scan parameters
-- Detailed logging
+- Detailed logging with debug mode
 - Retry mechanisms for reliability
 - Scan result verification
+- Test mode for validating notification configuration
 
 ## Prerequisites
 
@@ -69,6 +72,10 @@ Enable or disable notifications globally:
 ```ini
 [Notification]
 enabled = true
+# Enable alerts for each scanned IP (in addition to change alerts)
+individual_ip_alerts = true
+# Enable notifications when IP scans begin (useful for tracking)
+send_scan_start_alerts = false
 ```
 
 #### Email Notifications
@@ -133,6 +140,20 @@ Or with a custom configuration file:
 python3 port_monitor.py -c /path/to/custom_config.conf
 ```
 
+### Debug Mode
+
+Enable detailed logging with the debug flag:
+```bash
+python3 port_monitor.py --debug
+```
+
+### Test Notifications
+
+Test notification system for a specific IP without running a full scan:
+```bash
+python3 port_monitor.py --test-ip-alert 192.168.1.1
+```
+
 ### Running as a Service
 
 During installation, you can choose to set up a cron job that will run the monitor automatically according to your configured schedule.
@@ -157,13 +178,32 @@ This example runs the monitor every 4 hours.
 
 ## Notifications
 
-When changes are detected (new hosts, new open ports, or closed ports), notifications will be sent through all enabled notification channels.
+The system provides two types of notifications:
 
-Notifications include:
+### 1. Individual IP Scan Alerts
+
+Sent immediately after each IP address is scanned (when `individual_ip_alerts = true`):
+- IP address that was scanned
+- List of all open ports found on that IP
+- Service details for each open port
+- Scan timestamp
+
+### 2. Change Detection Alerts
+
+Sent when changes are detected between the current scan and previous scan:
 - List of new hosts and their open ports
 - List of new open ports on existing hosts
 - List of ports that have been closed since the last scan
 - Scan metadata (time, system information)
+
+### 3. Scan Start Alerts (Optional)
+
+Sent when a scan begins for an IP address (when `send_scan_start_alerts = true`):
+- IP address being scanned
+- Attempt number and max retries
+- Timestamp
+
+All notifications are sent through the enabled notification channels (Email, Slack, and/or Telegram).
 
 ## Advanced Options
 
