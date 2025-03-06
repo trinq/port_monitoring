@@ -187,15 +187,27 @@ class PortMonitor:
         
     def send_ip_scanned_notification(self, ip, scan_data):
         """Send notification that an IP has been scanned"""
-        if not self.notification_enabled or not self.individual_ip_alerts:
+        logger.info(f"Attempting to send notification for IP {ip}")
+        
+        if not self.notification_enabled:
+            logger.info(f"Notifications are disabled, skipping alert for IP {ip}")
             return
             
+        if not self.individual_ip_alerts:
+            logger.info(f"Individual IP alerts are disabled, skipping alert for IP {ip}")
+            return
+            
+        logger.info(f"Processing notification for IP {ip} with {len(scan_data.get('ports', {}))} open ports")
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         ports_info = {}
         
         # Format the port information
         if scan_data and 'ports' in scan_data:
             ports_info = scan_data['ports']
+            port_list = list(ports_info.keys())
+            logger.info(f"Found open ports for {ip}: {port_list[:5]}{'...' if len(port_list) > 5 else ''}")
+        else:
+            logger.info(f"No open ports found for {ip}")
         
         # Create a notification message
         message = {
@@ -208,19 +220,36 @@ class PortMonitor:
         }
         
         try:
+            notification_sent = False
+            
             # Email notification
             if self.config.getboolean('Email', 'enabled', fallback=False):
+                logger.info(f"Sending email notification for IP {ip}")
                 self._send_ip_scan_email(ip, message["ip_scan"])
+                notification_sent = True
+            else:
+                logger.info("Email notifications disabled in config")
             
             # Slack notification
             if self.config.getboolean('Slack', 'enabled', fallback=False):
+                logger.info(f"Sending Slack notification for IP {ip}")
                 self._send_ip_scan_slack(ip, message["ip_scan"])
+                notification_sent = True
+            else:
+                logger.info("Slack notifications disabled in config")
             
             # Telegram notification
             if self.config.getboolean('Telegram', 'enabled', fallback=False):
+                logger.info(f"Sending Telegram notification for IP {ip}")
                 self._send_ip_scan_telegram(ip, message["ip_scan"])
+                notification_sent = True
+            else:
+                logger.info("Telegram notifications disabled in config")
                 
-            logger.info(f"Sent scan notification for IP {ip}")
+            if notification_sent:
+                logger.info(f"Successfully sent scan notification for IP {ip}")
+            else:
+                logger.warning(f"No notifications were sent for IP {ip} - all notification channels are disabled")
         except Exception as e:
             logger.error(f"Error sending IP scan notification for {ip}: {e}")
     
@@ -637,17 +666,32 @@ class PortMonitor:
     
     def extract_scanned_ips(self, xml_file):
         """Extract information about individual IPs from the scan results"""
+        logger.info(f"Extracting IP information from scan file: {xml_file}")
+        
+        if not os.path.exists(xml_file):
+            logger.error(f"Scan file does not exist: {xml_file}")
+            return {}
+            
         try:
             tree = ET.parse(xml_file)
             root = tree.getroot()
             
+            hosts_total = len(root.findall('./host'))
+            logger.info(f"Found {hosts_total} hosts in scan file")
+            
             ip_results = {}
             for host in root.findall('./host'):
                 addr_elem = host.find('./address')
-                if addr_elem is None or addr_elem.get('addrtype') != 'ipv4':
+                if addr_elem is None:
+                    logger.debug("Found host without address element, skipping")
+                    continue
+                    
+                if addr_elem.get('addrtype') != 'ipv4':
+                    logger.debug(f"Skipping non-IPv4 address of type {addr_elem.get('addrtype')}")
                     continue
                     
                 ip = addr_elem.get('addr')
+                logger.debug(f"Processing IP: {ip}")
                 ip_results[ip] = {'ports': {}}
                 
                 # Get host status
@@ -1091,9 +1135,48 @@ class PortMonitor:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Port Monitor")
     parser.add_argument("-c", "--config", help="Path to configuration file", default="port_monitor.conf")
+    parser.add_argument("--test-ip-alert", help="Test IP alert by sending a notification for the specified IP", type=str)
+    parser.add_argument("--debug", help="Enable debug logging", action="store_true")
     args = parser.parse_args()
     
+    # Set debug logging if requested
+    if args.debug:
+        logger.setLevel(logging.DEBUG)
+        for handler in logger.handlers:
+            handler.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled")
+    
     monitor = PortMonitor(args.config)
+    
+    # Test mode for IP alerts
+    if args.test_ip_alert:
+        logger.info(f"TEST MODE: Sending test notification for IP {args.test_ip_alert}")
+        # Create a minimal test scan for the specified IP
+        test_data = {
+            'status': 'up',
+            'ports': {
+                '80/tcp': {
+                    'state': 'open',
+                    'reason': 'syn-ack',
+                    'name': 'http',
+                    'product': 'Test Web Server',
+                    'version': '1.0',
+                    'extrainfo': 'Test Mode'
+                },
+                '443/tcp': {
+                    'state': 'open',
+                    'reason': 'syn-ack',
+                    'name': 'https',
+                    'product': 'Test SSL Server',
+                    'version': '1.0',
+                    'extrainfo': 'Test Mode'
+                }
+            }
+        }
+        # Send test notification
+        monitor.send_ip_scanned_notification(args.test_ip_alert, test_data)
+        logger.info("Test complete. Exiting.")
+        sys.exit(0)
     
     while not SHUTDOWN_REQUESTED:
         try:
@@ -1101,12 +1184,21 @@ if __name__ == "__main__":
             if xml_file:
                 # Process individual IP scan results if enabled
                 if monitor.individual_ip_alerts:
+                    logger.info("Individual IP alerts are enabled, processing IP scan results")
+                    
                     # Extract individual IP data from the scan results
                     ip_results = monitor.extract_scanned_ips(xml_file)
+                    ip_count = len(ip_results)
+                    logger.info(f"Extracted data for {ip_count} IPs from scan results")
+                    
+                    if ip_count == 0:
+                        logger.warning("No IP data was extracted from the scan results")
                     
                     # Send notifications for each scanned IP
                     for ip, scan_data in ip_results.items():
                         monitor.send_ip_scanned_notification(ip, scan_data)
+                else:
+                    logger.info("Individual IP alerts are disabled in configuration")
                 
                 # Continue with existing functionality to detect changes
                 current_scan = monitor.parse_scan_results(xml_file)
