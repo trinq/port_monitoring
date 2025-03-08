@@ -162,17 +162,22 @@ class NmapScanner(BaseScanner):
                         logging.debug(f"Processing IP: {ip}")
                         
                         if ip_scan_result and ip_scan_result.get('hosts', {}):
-                            logging.info(f"Hosts in result: {list(ip_scan_result.get('hosts', {}).keys())}")
+                            hosts = ip_scan_result.get('hosts', {})
+                            logging.info(f"Hosts in result: {list(hosts.keys())}")
                             
-                            # Check if IP exists in hosts dictionary
-                            if ip in ip_scan_result.get('hosts', {}):
+                            # Get the first host from the results if it exists
+                            # This handles cases where IP in XML might be formatted differently than the input IP
+                            if len(hosts) > 0:
+                                actual_ip = list(hosts.keys())[0]  # Use the first host found in results
+                                logging.info(f"Using host data from {actual_ip} for IP {ip}")
+                                
                                 # Extract data for this IP
-                                host_data = ip_scan_result['hosts'][ip]
+                                host_data = hosts[actual_ip]
                                 timestamp = ip_scan_result.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                                 
                                 # Log port information
                                 port_count = len(host_data.get('ports', {}))
-                                logging.info(f"Found {port_count} open ports for {ip}")
+                                logging.info(f"Found {port_count} open ports for {actual_ip}")
                                 if port_count > 0:
                                     for port, port_info in host_data.get('ports', {}).items():
                                         logging.debug(f"Port {port}: {port_info.get('service', 'unknown')}/{port_info.get('state', 'unknown')}")
@@ -191,7 +196,7 @@ class NmapScanner(BaseScanner):
                                 notification_manager.notify_ip_scanned(ip, scan_data, position=idx, total=total_ips)
                                 logging.info(f"Sent scan result notification for IP: {ip} ({idx}/{total_ips})")
                             else:
-                                logging.warning(f"IP {ip} not found in scan results, found IPs: {list(ip_scan_result.get('hosts', {}).keys())}")
+                                logging.warning(f"No hosts found in scan results for {ip}")
                     except Exception as e:
                         logging.error(f"Error sending scan result notification for {ip}: {e}")
             except Exception as e:
