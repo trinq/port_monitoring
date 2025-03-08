@@ -118,8 +118,8 @@ class PortMonitor:
         except Exception as e:
             logging.error(f"Error sending scan start notification: {e}")
         
-        # Run the scan
-        scan_result_file = self.scanner.run_scan(scan_id)
+        # Run the scan sequentially (one IP at a time)
+        scan_result_file = self.scanner.run_scan_sequential(scan_id)
         
         if scan_result_file:
             success = self._process_scan_results(scan_result_file, scan_id)

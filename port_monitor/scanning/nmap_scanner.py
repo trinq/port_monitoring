@@ -29,6 +29,210 @@ class NmapScanner(BaseScanner):
         self.verification_timeout = config.getint('Reliability', 'verification_timeout_seconds', fallback=5)
         self.verification_ports = config.get('Reliability', 'verification_ports', fallback='22,80,443').split(',')
     
+    def run_scan_sequential(self, scan_id: str) -> Optional[str]:
+        """Run nmap scan for each IP one at a time in sequence"""
+        # Create output directories
+        os.makedirs(self.output_dir, exist_ok=True)
+        temp_dir = os.path.join(self.output_dir, f"scan_{scan_id}_temp")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Final output files
+        final_xml_output = os.path.join(self.output_dir, f"scan_{scan_id}.xml")
+        final_txt_output = os.path.join(self.output_dir, f"scan_{scan_id}.txt")
+        
+        # Read the IP list file
+        ip_list_file = self.config.get_ip_list_file()
+        if not os.path.exists(ip_list_file):
+            logging.error(f"IP list file not found: {ip_list_file}")
+            return None
+            
+        logging.info(f"Reading IP list from {ip_list_file}")
+        with open(ip_list_file, 'r') as f:
+            ips = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+        
+        total_ips = len(ips)
+        logging.info(f"Found {total_ips} IPs to scan sequentially")
+        
+        # Get notification manager
+        notification_manager = None
+        if getattr(self, '_parent', None):
+            notification_manager = getattr(self._parent, 'notification_manager', None)
+        
+        successful_scans = 0
+        individual_results = []
+        
+        # Process each IP individually
+        for idx, ip in enumerate(ips, 1):
+            try:
+                # Send notification for this IP with position information
+                if self.config.get_notify_ip_scan_started() and notification_manager:
+                    result = notification_manager.notify_ip_scan_started(ip, scan_id, position=idx, total=total_ips)
+                    logging.info(f"Sent scan start notification for IP: {ip} ({idx}/{total_ips}), result: {result}")
+                
+                # Create temp files for this IP scan
+                ip_xml_output = os.path.join(temp_dir, f"{ip}.xml")
+                ip_txt_output = os.path.join(temp_dir, f"{ip}.txt")
+                
+                # Create a temporary file with just this IP
+                ip_list_temp = os.path.join(temp_dir, f"{ip}.list")
+                with open(ip_list_temp, 'w') as f:
+                    f.write(f"{ip}\n")
+                
+                # Run nmap for this single IP
+                logging.info(f"Scanning IP {idx}/{total_ips}: {ip}")
+                
+                # Create nmap command for this IP
+                ports = self.config.get('Scan', 'ports', fallback='22,80,443,3389,8080')
+                cmd = [
+                    'nmap',
+                    '-sS',                 # SYN scan
+                    '-sV',                 # Version detection
+                    '-T4',                 # Timing template (higher is faster)
+                    '-Pn',                 # Skip host discovery
+                    '-n',                  # No DNS resolution
+                    '--scan-delay', '0.5s',  # Add delay between probes
+                    '--max-rate', '100',   # Maximum number of packets sent per second
+                    '--randomize-hosts',   # Randomize target host order
+                    '-p', ports,           # Port specification
+                    '-oX', ip_xml_output,  # XML output
+                    '-oN', ip_txt_output,  # Normal output
+                    '-iL', ip_list_temp    # Input from list
+                ]
+                
+                # Run scan with retry logic for this IP
+                success = False
+                attempt = 0
+                
+                while not success and attempt < self.max_retries:
+                    attempt += 1
+                    logging.info(f"Starting nmap scan for {ip} (attempt {attempt}/{self.max_retries})")
+                    logging.debug(f"Command: {' '.join(cmd)}")
+                    
+                    try:
+                        # Start the scan process
+                        process = subprocess.Popen(
+                            cmd, 
+                            stdout=subprocess.PIPE, 
+                            stderr=subprocess.PIPE,
+                            universal_newlines=True
+                        )
+                        
+                        # Monitor the scan process
+                        try:
+                            stdout, stderr = process.communicate()
+                            
+                            # Check scan result
+                            if process.returncode == 0 and os.path.exists(ip_xml_output):
+                                logging.info(f"Scan completed successfully for {ip}. Output saved to {ip_xml_output}")
+                                success = True
+                                successful_scans += 1
+                                individual_results.append((ip, ip_xml_output, ip_txt_output))
+                            else:
+                                logging.error(f"Scan failed for {ip} with return code {process.returncode}")
+                                if stdout: logging.error(f"STDOUT: {stdout}")
+                                if stderr: logging.error(f"STDERR: {stderr}")
+                                
+                                # Exponential backoff with jitter for retry
+                                if attempt < self.max_retries:
+                                    delay = self.retry_delay_base * (2 ** (attempt - 1)) + random.uniform(0, self.retry_delay_base)
+                                    logging.info(f"Retrying in {delay:.1f} seconds...")
+                                    time.sleep(delay)
+                        except KeyboardInterrupt:
+                            logging.warning("Scan interrupted, terminating nmap process")
+                            process.terminate()
+                            raise
+                    except Exception as e:
+                        logging.error(f"Error during scan execution for {ip}: {e}")
+                        if attempt < self.max_retries:
+                            delay = self.retry_delay_base * (2 ** (attempt - 1)) + random.uniform(0, self.retry_delay_base)
+                            logging.info(f"Retrying in {delay:.1f} seconds...")
+                            time.sleep(delay)
+                
+                # If scan was successful, send the individual IP scan result notification
+                if success and notification_manager and getattr(self._parent, 'result_parser', None):
+                    try:
+                        # Parse individual scan result
+                        parser = getattr(self._parent, 'result_parser')
+                        ip_scan_result = parser.parse_xml(ip_xml_output)
+                        
+                        if ip_scan_result and ip_scan_result.get('hosts', {}).get(ip):
+                            # Extract data for just this IP
+                            host_data = ip_scan_result['hosts'][ip]
+                            timestamp = ip_scan_result.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                            
+                            # Prepare scan data
+                            scan_data = {
+                                'timestamp': timestamp,
+                                'ports': host_data.get('ports', {}),
+                                'port_count': len(host_data.get('ports', {})),
+                                'os': host_data.get('os', ''),
+                                'status': host_data.get('status', 'unknown')
+                            }
+                            
+                            # Send notification for this IP result
+                            notification_manager.notify_ip_scanned(ip, scan_data, position=idx, total=total_ips)
+                            logging.info(f"Sent scan result notification for IP: {ip} ({idx}/{total_ips})")
+                    except Exception as e:
+                        logging.error(f"Error sending scan result notification for {ip}: {e}")
+            except Exception as e:
+                logging.error(f"Error processing IP {ip}: {e}", exc_info=True)
+        
+        # All individual scans completed, now merge the results
+        if not individual_results:
+            logging.error("No individual IP scans were successful")
+            return None
+            
+        # Create combined XML output (very basic merge implementation)
+        with open(final_xml_output, 'w') as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+            f.write('<!DOCTYPE nmaprun>\n')
+            f.write(f'<nmaprun scanner="nmap" args="combined scan {scan_id}" start="{int(time.time())}" startstr="{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}" version="7.80">\n')
+            
+            f.write('  <scaninfo type="syn" protocol="tcp" services=""/>\n')
+            f.write('  <verbose level="0"/>\n')
+            f.write('  <debugging level="0"/>\n')
+            
+            # Extract host elements from each individual scan
+            for ip, xml_file, _ in individual_results:
+                try:
+                    with open(xml_file, 'r') as host_file:
+                        content = host_file.read()
+                        # Extract the <host>...</host> section (very simple approach, might need improvement)
+                        host_start = content.find('<host')
+                        host_end = content.find('</host>', host_start) + 7
+                        if host_start > 0 and host_end > 0:
+                            host_section = content[host_start:host_end]
+                            f.write(f'  {host_section}\n')
+                except Exception as e:
+                    logging.error(f"Error extracting host data from {xml_file}: {e}")
+            
+            # Close the root element
+            f.write('  <runstats>\n')
+            f.write(f'    <finished time="{int(time.time())}" timestr="{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}" summary="Combined scan complete"/>\n')
+            f.write(f'    <hosts up="{successful_scans}" down="{total_ips - successful_scans}" total="{total_ips}"/>\n')
+            f.write('  </runstats>\n')
+            f.write('</nmaprun>\n')
+        
+        # Combine all text outputs
+        with open(final_txt_output, 'w') as outfile:
+            outfile.write(f"# Combined scan results for scan_id: {scan_id}\n")
+            outfile.write(f"# Total IPs: {total_ips}, Successfully scanned: {successful_scans}\n\n")
+            
+            for ip, _, txt_file in individual_results:
+                if os.path.exists(txt_file):
+                    outfile.write(f"\n# --- Results for {ip} ---\n\n")
+                    with open(txt_file, 'r') as infile:
+                        outfile.write(infile.read())
+                    outfile.write("\n")
+        
+        # Save to history
+        if os.path.exists(final_xml_output):
+            history_file = os.path.join(self.history_dir, f"scan_{scan_id}.xml")
+            shutil.copy2(final_xml_output, history_file)
+            logging.info(f"Saved combined scan results to history: {history_file}")
+        
+        return final_xml_output
+    
     def run_scan(self, scan_id: str) -> Optional[str]:
         """Run nmap scan with retry mechanism and return the output file path"""
         xml_output = os.path.join(self.output_dir, f"scan_{scan_id}.xml")
