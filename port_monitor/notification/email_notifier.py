@@ -240,4 +240,3 @@ class EmailNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         html += "</body></html>"
         return html
-"""

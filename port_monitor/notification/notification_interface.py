@@ -87,4 +87,3 @@ class IPScanNotifier(BaseNotifier):
             True if notification was sent successfully, False otherwise
         """
         pass
-"""

@@ -294,4 +294,3 @@ class PortMonitor:
             logging.debug(f"Archived scan results to {archive_file}")
         except Exception as e:
             logging.error(f"Error archiving scan results: {e}")
-"""
