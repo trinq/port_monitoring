@@ -75,6 +75,20 @@ class IPScanNotifier(BaseNotifier):
     """Interface for services that notify about individual IP scan events"""
     
     @abstractmethod
+    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
+        """
+        Send notification that a scan has started for a specific IP address
+        
+        Args:
+            ip: The IP address being scanned
+            scan_id: Unique ID of the current scan
+            
+        Returns:
+            True if notification was sent successfully, False otherwise
+        """
+        pass
+    
+    @abstractmethod
     def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> bool:
         """
         Send notification with details about a scanned IP

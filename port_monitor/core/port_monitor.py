@@ -49,7 +49,10 @@ class PortMonitor:
     def _create_scanner(self) -> BaseScanner:
         """Create the appropriate scanner based on configuration"""
         # For future extensibility, could select different scanner implementations
-        return NmapScanner(self.config)
+        scanner = NmapScanner(self.config)
+        # Set the parent reference so the scanner can access the notification manager
+        scanner._parent = self
+        return scanner
     
     def _setup_signal_handlers(self) -> None:
         """Set up signal handlers for graceful shutdown"""

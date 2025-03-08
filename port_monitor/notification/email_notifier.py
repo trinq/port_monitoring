@@ -141,6 +141,33 @@ class EmailNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         """
         return self._send_email(subject, body, html=True)
     
+    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
+        """Send email notification that a scan has started for a specific IP address"""
+        if not self.is_enabled():
+            return False
+            
+        logging.debug(f"Sending IP scan start email notification for {ip}")
+        
+        # Create subject
+        subject = f"[PORT MONITOR] IP Scan Started: {ip} - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        # Build HTML body
+        body = f"""
+        <html><body>
+        <h2>IP Scan Started: {ip}</h2>
+        <p>A port scan has been initiated for this IP address.</p>
+        <ul>
+            <li><b>IP Address:</b> {ip}</li>
+            <li><b>Scan ID:</b> {scan_id}</li>
+            <li><b>Start Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</li>
+            <li><b>System:</b> {os.uname().nodename}</li>
+        </ul>
+        <p>You will receive another notification when the scan completes.</p>
+        </body></html>
+        """
+        
+        return self._send_email(subject, body, html=True)
+    
     def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> bool:
         """Send email notification about an individual IP scan"""
         if not scan_data.get('ports'):

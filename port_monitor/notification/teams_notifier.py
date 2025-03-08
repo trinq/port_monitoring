@@ -10,9 +10,9 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from port_monitor.config.configuration import ConfigManager
-from port_monitor.notification.notification_interface import ChangeNotifier, ScanNotifier
+from port_monitor.notification.notification_interface import ChangeNotifier, ScanNotifier, IPScanNotifier
 
-class TeamsNotifier(ChangeNotifier, ScanNotifier):
+class TeamsNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
     """Microsoft Teams notification implementation"""
     
     def __init__(self, config: ConfigManager):
@@ -172,6 +172,152 @@ class TeamsNotifier(ChangeNotifier, ScanNotifier):
                 }
             ]
         }
+        return self._send_teams_message(card)
+    
+    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
+        """Send Teams notification that a scan has started for a specific IP address"""
+        if not self.is_enabled():
+            return False
+            
+        logging.debug(f"Sending IP scan start Teams notification for {ip}")
+        
+        card = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "body": [
+                            {
+                                "type": "TextBlock",
+                                "size": "medium",
+                                "weight": "bolder",
+                                "text": f"🔍 IP Scan Started: {ip}"
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": "A port scan has been initiated for this IP address.",
+                                "wrap": True
+                            },
+                            {
+                                "type": "FactSet",
+                                "facts": [
+                                    {
+                                        "title": "IP Address",
+                                        "value": ip
+                                    },
+                                    {
+                                        "title": "Scan ID",
+                                        "value": scan_id
+                                    },
+                                    {
+                                        "title": "Start Time",
+                                        "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                                    }
+                                ]
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": "You will receive another notification when the scan completes.",
+                                "wrap": True,
+                                "isSubtle": True
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                                "isSubtle": True,
+                                "size": "small"
+                            }
+                        ],
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "version": "1.2"
+                    }
+                }
+            ]
+        }
+        return self._send_teams_message(card)
+    
+    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> bool:
+        """Send Teams notification with details about a scanned IP"""
+        if not self.is_enabled() or not scan_data.get('ports'):
+            return False
+            
+        logging.debug(f"Sending IP scan Teams notification for {ip}")
+        
+        card = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "type": "AdaptiveCard",
+                        "body": [
+                            {
+                                "type": "TextBlock",
+                                "size": "medium",
+                                "weight": "bolder",
+                                "text": f"📊 IP Scan Results: {ip}"
+                            },
+                            {
+                                "type": "TextBlock",
+                                "text": f"Scan completed for IP address {ip}",
+                                "wrap": True
+                            },
+                            {
+                                "type": "FactSet",
+                                "facts": [
+                                    {
+                                        "title": "IP Address",
+                                        "value": ip
+                                    },
+                                    {
+                                        "title": "Scan Time",
+                                        "value": scan_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                                    },
+                                    {
+                                        "title": "Open Ports",
+                                        "value": str(scan_data.get('port_count', 0))
+                                    }
+                                ]
+                            }
+                        ],
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "version": "1.2"
+                    }
+                }
+            ]
+        }
+        
+        card_content = card["attachments"][0]["content"]["body"]
+        
+        # Add port details
+        if scan_data.get('port_count', 0) > 0:
+            port_text = "**Open Ports:**"
+            for port, service in scan_data.get('ports', {}).items():
+                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}".strip()
+                port_text += f"\n- {port} - {service_str}"
+                
+            card_content.append({
+                "type": "TextBlock",
+                "text": port_text,
+                "wrap": True
+            })
+        else:
+            card_content.append({
+                "type": "TextBlock",
+                "text": "**Open Ports:** *No open ports detected*",
+                "wrap": True
+            })
+        
+        # Add footer
+        card_content.append({
+            "type": "TextBlock",
+            "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            "isSubtle": True,
+            "size": "small"
+        })
+        
         return self._send_teams_message(card)
     
     def _format_changes_for_teams(self, changes: Dict[str, Any]) -> Dict[str, Any]:

@@ -10,9 +10,9 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 from port_monitor.config.configuration import ConfigManager
-from port_monitor.notification.notification_interface import ChangeNotifier, ScanNotifier
+from port_monitor.notification.notification_interface import ChangeNotifier, ScanNotifier, IPScanNotifier
 
-class SlackNotifier(ChangeNotifier, ScanNotifier):
+class SlackNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
     """Slack notification implementation that can handle change and scan notifications"""
     
     def __init__(self, config: ConfigManager):
@@ -134,6 +134,90 @@ class SlackNotifier(ChangeNotifier, ScanNotifier):
                 "text": {
                     "type": "mrkdwn",
                     "text": f"The port scan has completed.\n*Scan ID:* {scan_id}\n*Completion Status:* {'Success' if success else 'Failed'}\n*Scanned:* {scanned}/{total} IP addresses ({percentage:.1f}%)\n*Completion Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    }
+                ]
+            }
+        ]
+        return self._send_slack_message(blocks)
+    
+    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
+        """Send Slack notification that a scan has started for a specific IP address"""
+        if not self.is_enabled():
+            return False
+            
+        logging.debug(f"Sending IP scan start Slack notification for {ip}")
+        
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"🔍 IP Scan Started: {ip}"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"A port scan has been initiated for this IP address.\n*IP Address:* {ip}\n*Scan ID:* {scan_id}\n*Start Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+            },
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                    }
+                ]
+            }
+        ]
+        return self._send_slack_message(blocks)
+    
+    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> bool:
+        """Send Slack notification with details about a scanned IP"""
+        if not self.is_enabled() or not scan_data.get('ports'):
+            return False
+            
+        logging.debug(f"Sending IP scan Slack notification for {ip}")
+        
+        # Create port list text
+        port_text = ""
+        for port, service in scan_data.get('ports', {}).items():
+            service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}".strip()
+            port_text += f"\n• {port} - {service_str}"
+        
+        if not port_text:
+            port_text = "\n_No open ports detected_"
+        
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"📊 IP Scan Results: {ip}"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"Scan completed for IP address {ip}\n*Scan Time:* {scan_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Open Ports:*{port_text}"
                 }
             },
             {

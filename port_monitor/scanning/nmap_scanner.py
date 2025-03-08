@@ -34,6 +34,9 @@ class NmapScanner(BaseScanner):
         xml_output = os.path.join(self.output_dir, f"scan_{scan_id}.xml")
         normal_output = os.path.join(self.output_dir, f"scan_{scan_id}.txt")
         
+        # Send notifications for each IP being scanned
+        self._notify_ip_scan_started(scan_id)
+        
         # Create nmap command
         cmd = self._create_nmap_command(xml_output, normal_output)
         
@@ -225,6 +228,42 @@ class NmapScanner(BaseScanner):
         except Exception as e:
             logging.error(f"Error during deep verification: {e}")
             return False
+    
+    def _notify_ip_scan_started(self, scan_id: str) -> None:
+        """Send notifications for each IP being scanned"""
+        ip_list_file = self.config.get_ip_list_file()
+        
+        # Check if notification manager is available
+        notification_manager = getattr(self, 'notification_manager', None)
+        if not notification_manager:
+            # Try to get it from the parent PortMonitor if available
+            from port_monitor.core.port_monitor import PortMonitor
+            parent = getattr(self, '_parent', None)
+            if isinstance(parent, PortMonitor):
+                notification_manager = getattr(parent, 'notification_manager', None)
+        
+        # If we can't find a notification manager, we can't send notifications
+        if not notification_manager:
+            logging.warning("Cannot send IP scan start notifications: notification manager not available")
+            return
+        
+        try:
+            # Read the IP list file
+            if os.path.exists(ip_list_file):
+                with open(ip_list_file, 'r') as f:
+                    for line in f:
+                        ip = line.strip()
+                        if ip and not ip.startswith('#'):
+                            try:
+                                # Send notification for this IP
+                                notification_manager.notify_ip_scan_started(ip, scan_id)
+                                logging.debug(f"Sent scan start notification for IP: {ip}")
+                            except Exception as e:
+                                logging.error(f"Error sending scan start notification for IP {ip}: {e}")
+            else:
+                logging.warning(f"IP list file not found: {ip_list_file}")
+        except Exception as e:
+            logging.error(f"Error reading IP list file: {e}")
     
     def _create_nmap_command(self, xml_output: str, normal_output: str) -> List[str]:
         """Create the nmap command with appropriate arguments"""
