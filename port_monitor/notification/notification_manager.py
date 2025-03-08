@@ -152,8 +152,18 @@ class NotificationManager:
             except Exception as e:
                 logging.error(f"Error sending scan completion notification via {notifier.get_name()}: {e}")
     
-    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
-        """Send notifications about IP scan start to all enabled IP scan notifiers"""
+    def notify_ip_scan_started(self, ip: str, scan_id: str, position: int = 0, total: int = 0) -> bool:
+        """Send notifications about IP scan start to all enabled IP scan notifiers
+        
+        Args:
+            ip: The IP address being scanned
+            scan_id: The scan identifier
+            position: The position of this IP in the scan sequence (1-based)
+            total: The total number of IPs to be scanned
+            
+        Returns:
+            bool: True if any notification was sent successfully
+        """
         # Find all enabled IP scan notifiers
         ip_notifiers = [n for n in self.notifiers 
                        if isinstance(n, IPScanNotifier) and n.is_enabled()]
@@ -166,7 +176,7 @@ class NotificationManager:
         success_count = 0
         for notifier in ip_notifiers:
             try:
-                success = notifier.notify_ip_scan_started(ip, scan_id)
+                success = notifier.notify_ip_scan_started(ip, scan_id, position, total)
                 if success:
                     success_count += 1
                     logging.info(f"Successfully sent IP scan start notification for {ip} via {notifier.get_name()}")
@@ -177,20 +187,32 @@ class NotificationManager:
         
         return success_count > 0
     
-    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> None:
-        """Send notifications about individual IP scan to all enabled IP scan notifiers"""
+    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any], position: int = 0, total: int = 0) -> bool:
+        """Send notifications about individual IP scan to all enabled IP scan notifiers
+        
+        Args:
+            ip: The IP address that was scanned
+            scan_data: Data from the scan result
+            position: The position of this IP in the scan sequence (1-based)
+            total: The total number of IPs being scanned
+            
+        Returns:
+            bool: True if any notification was sent successfully
+        """
         # Find all enabled IP scan notifiers
         ip_notifiers = [n for n in self.notifiers 
                        if isinstance(n, IPScanNotifier) and n.is_enabled()]
         
         if not ip_notifiers:
-            return
+            return False
             
         # Send notifications
+        success_count = 0
         for notifier in ip_notifiers:
             try:
-                success = notifier.notify_ip_scanned(ip, scan_data)
+                success = notifier.notify_ip_scanned(ip, scan_data, position, total)
                 if success:
+                    success_count += 1
                     logging.info(f"Successfully sent IP scan notification for {ip} via {notifier.get_name()}")
                 else:
                     logging.warning(f"Failed to send IP scan notification for {ip} via {notifier.get_name()}")

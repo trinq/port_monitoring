@@ -179,15 +179,30 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         return self._send_telegram_message(message)
     
-    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
+    def notify_ip_scan_started(self, ip: str, scan_id: str, position: int = 0, total: int = 0) -> bool:
         """Send Telegram notification that a scan has started for a specific IP address"""
         if not self.is_enabled():
             return False
             
         logging.debug(f"Sending IP scan start Telegram notification for {ip}")
         
+        # Create ordinal string (1st, 2nd, 3rd, etc.)
+        ordinal = ""  
+        if position > 0 and total > 0:
+            if position % 10 == 1 and position != 11:
+                ordinal = f"{position}st"
+            elif position % 10 == 2 and position != 12:
+                ordinal = f"{position}nd"
+            elif position % 10 == 3 and position != 13:
+                ordinal = f"{position}rd"
+            else:
+                ordinal = f"{position}th"
+        
         message = f"<b>🔍 IP Scan Started: {ip}</b>\n\n"
-        message += f"A port scan has been initiated for this IP address.\n"
+        
+        if position > 0 and total > 0:
+            message += f"Starting scan of the <b>{ordinal}</b> IP address out of <b>{total}</b> total.\n\n"
+        
         message += f"<b>IP Address:</b> {ip}\n"
         message += f"<b>Scan ID:</b> {scan_id}\n"
         message += f"<b>Start Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -196,20 +211,43 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         return self._send_telegram_message(message)
     
-    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> bool:
-        """Send Telegram notification with details about a scanned IP"""
-        if not self.is_enabled() or not scan_data.get('ports'):
+    def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any], position: int = 0, total: int = 0) -> bool:
+        """Send Telegram notification with details about a scanned IP
+        
+        Args:
+            ip: The IP address that was scanned
+            scan_data: Data from the scan result
+            position: The position of this IP in the scan sequence (1-based)
+            total: The total number of IPs being scanned
+        """
+        if not self.is_enabled():
             return False
             
         logging.debug(f"Sending IP scan Telegram notification for {ip}")
         
         message = f"<b>📊 IP Scan Results: {ip}</b>\n\n"
-        message += f"Scan completed for IP address {ip}\n"
+        
+        # Add progress information if provided
+        if position > 0 and total > 0:
+            # Create ordinal string (1st, 2nd, 3rd, etc.)
+            ordinal = ""
+            if position % 10 == 1 and position != 11:
+                ordinal = f"{position}st"
+            elif position % 10 == 2 and position != 12:
+                ordinal = f"{position}nd"
+            elif position % 10 == 3 and position != 13:
+                ordinal = f"{position}rd"
+            else:
+                ordinal = f"{position}th"
+                
+            message += f"Completed scan of the <b>{ordinal}</b> IP address out of <b>{total}</b> total.\n\n"
+        
+        message += f"<b>IP Address:</b> {ip}\n"
         message += f"<b>Scan Time:</b> {scan_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}\n\n"
         
         # Open ports
         message += "<b>Open Ports:</b>\n"
-        if scan_data.get('port_count', 0) > 0:
+        if scan_data.get('ports', {}) and scan_data.get('port_count', 0) > 0:
             for port, service in scan_data.get('ports', {}).items():
                 service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}".strip()
                 message += f"• {port} - {service_str}\n"

@@ -228,6 +228,30 @@ class PortMonitor:
         if not current_results:
             logging.error("Failed to parse scan results")
             return False
+            
+        # Send notification for each individual IP in the scan results
+        if current_results.get('hosts'):
+            total_hosts = len(current_results['hosts'])
+            logging.info(f"Processing scan results for {total_hosts} hosts")
+            
+            # Process individual host scan results
+            for idx, (ip, host_data) in enumerate(current_results['hosts'].items(), 1):
+                # Prepare scan data for this IP
+                timestamp = current_results.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                scan_data = {
+                    'timestamp': timestamp,
+                    'ports': host_data.get('ports', {}),
+                    'port_count': len(host_data.get('ports', {})),
+                    'os': host_data.get('os', ''),
+                    'status': host_data.get('status', 'unknown')
+                }
+                
+                try:
+                    # Send notification for this IP with position information
+                    logging.info(f"Sending notification for IP {ip} ({idx}/{total_hosts})")
+                    self.notification_manager.notify_ip_scanned(ip, scan_data, position=idx, total=total_hosts)
+                except Exception as e:
+                    logging.error(f"Error sending individual IP scan notification for {ip}: {e}")
         
         # Get previous scan results for comparison
         previous_scan_file = self._get_latest_history_file()

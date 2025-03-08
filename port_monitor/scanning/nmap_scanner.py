@@ -261,13 +261,14 @@ class NmapScanner(BaseScanner):
                 logging.info(f"Reading IP list from {ip_list_file}")
                 with open(ip_list_file, 'r') as f:
                     ips = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
-                    logging.info(f"Found {len(ips)} IPs to process")
+                    total_ips = len(ips)
+                    logging.info(f"Found {total_ips} IPs to process")
                     
-                    for ip in ips:
+                    for idx, ip in enumerate(ips, 1):  # Start from 1 for user-friendly position
                         try:
-                            # Send notification for this IP
-                            result = notification_manager.notify_ip_scan_started(ip, scan_id)
-                            logging.info(f"Sent scan start notification for IP: {ip}, result: {result}")
+                            # Send notification for this IP with position information
+                            result = notification_manager.notify_ip_scan_started(ip, scan_id, position=idx, total=total_ips)
+                            logging.info(f"Sent scan start notification for IP: {ip} ({idx}/{total_ips}), result: {result}")
                         except Exception as e:
                             logging.error(f"Error sending scan start notification for IP {ip}: {e}", exc_info=True)
             else:
