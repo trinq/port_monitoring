@@ -65,7 +65,7 @@ class NmapScanner(BaseScanner):
         for idx, ip in enumerate(ips, 1):
             try:
                 # Send notification for this IP with position information
-                if self.config.get_notify_ip_scan_started() and notification_manager:
+                if notification_manager:
                     result = notification_manager.notify_ip_scan_started(ip, scan_id, position=idx, total=total_ips)
                     logging.info(f"Sent scan start notification for IP: {ip} ({idx}/{total_ips}), result: {result}")
                 
