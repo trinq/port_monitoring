@@ -232,6 +232,7 @@ class NmapScanner(BaseScanner):
     def _notify_ip_scan_started(self, scan_id: str) -> None:
         """Send notifications for each IP being scanned"""
         ip_list_file = self.config.get_ip_list_file()
+        logging.info(f"Starting to process IP scan notifications from file: {ip_list_file}")
         
         # Check if notification manager is available
         notification_manager = getattr(self, 'notification_manager', None)
@@ -241,29 +242,38 @@ class NmapScanner(BaseScanner):
             parent = getattr(self, '_parent', None)
             if isinstance(parent, PortMonitor):
                 notification_manager = getattr(parent, 'notification_manager', None)
+                logging.info(f"Found notification manager from parent PortMonitor: {notification_manager is not None}")
+            else:
+                logging.warning(f"Parent is not PortMonitor or not available: {parent}")
         
         # If we can't find a notification manager, we can't send notifications
         if not notification_manager:
             logging.warning("Cannot send IP scan start notifications: notification manager not available")
             return
         
+        # List enabled notifiers
+        enabled_notifiers = [n.get_name() for n in notification_manager.notifiers if n.is_enabled()]
+        logging.info(f"Enabled notification services: {', '.join(enabled_notifiers) if enabled_notifiers else 'None'}")
+        
         try:
             # Read the IP list file
             if os.path.exists(ip_list_file):
+                logging.info(f"Reading IP list from {ip_list_file}")
                 with open(ip_list_file, 'r') as f:
-                    for line in f:
-                        ip = line.strip()
-                        if ip and not ip.startswith('#'):
-                            try:
-                                # Send notification for this IP
-                                notification_manager.notify_ip_scan_started(ip, scan_id)
-                                logging.debug(f"Sent scan start notification for IP: {ip}")
-                            except Exception as e:
-                                logging.error(f"Error sending scan start notification for IP {ip}: {e}")
+                    ips = [line.strip() for line in f if line.strip() and not line.strip().startswith('#')]
+                    logging.info(f"Found {len(ips)} IPs to process")
+                    
+                    for ip in ips:
+                        try:
+                            # Send notification for this IP
+                            result = notification_manager.notify_ip_scan_started(ip, scan_id)
+                            logging.info(f"Sent scan start notification for IP: {ip}, result: {result}")
+                        except Exception as e:
+                            logging.error(f"Error sending scan start notification for IP {ip}: {e}", exc_info=True)
             else:
                 logging.warning(f"IP list file not found: {ip_list_file}")
         except Exception as e:
-            logging.error(f"Error reading IP list file: {e}")
+            logging.error(f"Error reading IP list file: {e}", exc_info=True)
     
     def _create_nmap_command(self, xml_output: str, normal_output: str) -> List[str]:
         """Create the nmap command with appropriate arguments"""

@@ -31,11 +31,13 @@ class NotificationManager:
         from port_monitor.notification.email_notifier import EmailNotifier
         from port_monitor.notification.slack_notifier import SlackNotifier
         from port_monitor.notification.teams_notifier import TeamsNotifier
+        from port_monitor.notification.telegram_notifier import TelegramNotifier
         
         # Initialize built-in notifiers
         self.notifiers.append(EmailNotifier(self.config))
         self.notifiers.append(SlackNotifier(self.config))
         self.notifiers.append(TeamsNotifier(self.config))
+        self.notifiers.append(TelegramNotifier(self.config))
         
         # Load custom notifiers from plugin directory if specified
         plugin_dir = self.config.get('Notification', 'plugin_dir', fallback='')
@@ -150,25 +152,30 @@ class NotificationManager:
             except Exception as e:
                 logging.error(f"Error sending scan completion notification via {notifier.get_name()}: {e}")
     
-    def notify_ip_scan_started(self, ip: str, scan_id: str) -> None:
+    def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
         """Send notifications about IP scan start to all enabled IP scan notifiers"""
         # Find all enabled IP scan notifiers
         ip_notifiers = [n for n in self.notifiers 
                        if isinstance(n, IPScanNotifier) and n.is_enabled()]
         
         if not ip_notifiers:
-            return
+            logging.warning(f"No enabled IP scan notifiers found for {ip}")
+            return False
             
         # Send notifications
+        success_count = 0
         for notifier in ip_notifiers:
             try:
                 success = notifier.notify_ip_scan_started(ip, scan_id)
                 if success:
+                    success_count += 1
                     logging.info(f"Successfully sent IP scan start notification for {ip} via {notifier.get_name()}")
                 else:
                     logging.warning(f"Failed to send IP scan start notification for {ip} via {notifier.get_name()}")
             except Exception as e:
                 logging.error(f"Error sending IP scan start notification for {ip} via {notifier.get_name()}: {e}")
+        
+        return success_count > 0
     
     def notify_ip_scanned(self, ip: str, scan_data: Dict[str, Any]) -> None:
         """Send notifications about individual IP scan to all enabled IP scan notifiers"""
