@@ -42,6 +42,14 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             logging.error("Telegram chat ID not configured")
         return chat_id
     
+    def _escape_markdown(self, text: str) -> str:
+        """Escape special characters for Telegram MarkdownV2 format"""
+        # Characters that need to be escaped: _ * [ ] ( ) ~ ` > # + - = | { } . !
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for char in special_chars:
+            text = text.replace(char, f'\\{char}')
+        return text
+    
     def _send_telegram_message(self, message: str) -> bool:
         """Send a message to Telegram chat"""
         token = self._get_bot_token()
@@ -52,12 +60,15 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         url = f"https://api.telegram.org/bot{token}/sendMessage"
         
-        # Prepare the payload
+        # Use HTML instead of Markdown to avoid escaping issues
         payload = {
             "chat_id": chat_id,
             "text": message,
-            "parse_mode": "Markdown"
+            "parse_mode": "HTML"
         }
+        
+        # For debugging
+        logging.debug(f"Sending Telegram message: {message}")
         
         # Send the request with retry logic
         for attempt in range(self.max_retries):
@@ -86,35 +97,35 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             
         logging.debug("Sending changes Telegram notification")
         
-        # Create message
-        message = "*⚠️ Port Changes Detected*\n\n"
+        # Create message with HTML formatting
+        message = "<b>⚠️ Port Changes Detected</b>\n\n"
         message += "The following changes were detected in the latest port scan:\n\n"
         
         # New hosts
-        message += "*New Hosts Detected:*\n"
+        message += "<b>New Hosts Detected:</b>\n"
         if changes["new_hosts"]:
             for host, data in changes["new_hosts"].items():
                 ports_str = ", ".join(data["ports"].keys())
                 message += f"• {host} - Ports: {ports_str}\n"
         else:
-            message += "_No new hosts detected_\n"
+            message += "<i>No new hosts detected</i>\n"
         
         message += "\n"
         
         # New ports
-        message += "*New Open Ports:*\n"
+        message += "<b>New Open Ports:</b>\n"
         if changes["new_ports"]:
             for host, ports in changes["new_ports"].items():
                 for port, service in ports.items():
                     service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
                     message += f"• {host}:{port} - {service_str}\n"
         else:
-            message += "_No new open ports detected_\n"
+            message += "<i>No new open ports detected</i>\n"
         
         message += "\n"
         
         # Closed ports
-        message += "*Closed Ports:*\n"
+        message += "<b>Closed Ports:</b>\n"
         if changes["closed_ports"]:
             for host, ports in changes["closed_ports"].items():
                 if "all" in ports:
@@ -123,10 +134,10 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                     for port in ports:
                         message += f"• {host}:{port}\n"
         else:
-            message += "_No ports closed since last scan_\n"
+            message += "<i>No ports closed since last scan</i>\n"
         
         # Footer
-        message += f"\n_Port Monitor | {changes.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}_"
+        message += f"\n<i>Port Monitor | {changes.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}</i>"
         
         return self._send_telegram_message(message)
     
@@ -137,13 +148,13 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             
         logging.debug("Sending scan start Telegram notification")
         
-        message = "*🔄 Port Scan Started*\n\n"
+        message = "<b>🔄 Port Scan Started</b>\n\n"
         message += f"A new port scan has been initiated.\n"
-        message += f"*Scan ID:* {scan_id}\n"
-        message += f"*Targets:* {targets} IP addresses\n"
-        message += f"*Start Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += f"<b>Scan ID:</b> {scan_id}\n"
+        message += f"<b>Targets:</b> {targets} IP addresses\n"
+        message += f"<b>Start Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         
-        message += f"\n_Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        message += f"\n<i>Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
         
         return self._send_telegram_message(message)
     
@@ -157,14 +168,14 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         status = "✅ Successfully" if success else "❌ With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0
         
-        message = f"*🏁 Port Scan Completed {status}*\n\n"
+        message = f"<b>🏁 Port Scan Completed {status}</b>\n\n"
         message += f"The port scan has completed.\n"
-        message += f"*Scan ID:* {scan_id}\n"
-        message += f"*Completion Status:* {'Success' if success else 'Failed'}\n"
-        message += f"*Scanned:* {scanned}/{total} IP addresses ({percentage:.1f}%)\n"
-        message += f"*Completion Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += f"<b>Scan ID:</b> {scan_id}\n"
+        message += f"<b>Completion Status:</b> {'Success' if success else 'Failed'}\n"
+        message += f"<b>Scanned:</b> {scanned}/{total} IP addresses ({percentage:.1f}%)\n"
+        message += f"<b>Completion Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         
-        message += f"\n_Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        message += f"\n<i>Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
         
         return self._send_telegram_message(message)
     
@@ -175,13 +186,13 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             
         logging.debug(f"Sending IP scan start Telegram notification for {ip}")
         
-        message = f"*🔍 IP Scan Started: {ip}*\n\n"
+        message = f"<b>🔍 IP Scan Started: {ip}</b>\n\n"
         message += f"A port scan has been initiated for this IP address.\n"
-        message += f"*IP Address:* {ip}\n"
-        message += f"*Scan ID:* {scan_id}\n"
-        message += f"*Start Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        message += f"<b>IP Address:</b> {ip}\n"
+        message += f"<b>Scan ID:</b> {scan_id}\n"
+        message += f"<b>Start Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         
-        message += f"\n_Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        message += f"\n<i>Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
         
         return self._send_telegram_message(message)
     
@@ -192,19 +203,19 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             
         logging.debug(f"Sending IP scan Telegram notification for {ip}")
         
-        message = f"*📊 IP Scan Results: {ip}*\n\n"
+        message = f"<b>📊 IP Scan Results: {ip}</b>\n\n"
         message += f"Scan completed for IP address {ip}\n"
-        message += f"*Scan Time:* {scan_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}\n\n"
+        message += f"<b>Scan Time:</b> {scan_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))}\n\n"
         
         # Open ports
-        message += "*Open Ports:*\n"
+        message += "<b>Open Ports:</b>\n"
         if scan_data.get('port_count', 0) > 0:
             for port, service in scan_data.get('ports', {}).items():
                 service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}".strip()
                 message += f"• {port} - {service_str}\n"
         else:
-            message += "_No open ports detected_\n"
+            message += "<i>No open ports detected</i>\n"
         
-        message += f"\n_Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        message += f"\n<i>Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
         
         return self._send_telegram_message(message)
