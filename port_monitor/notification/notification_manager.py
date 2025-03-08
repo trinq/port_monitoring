@@ -169,4 +169,4 @@ class NotificationManager:
                     logging.warning(f"Failed to send IP scan notification for {ip} via {notifier.get_name()}")
             except Exception as e:
                 logging.error(f"Error sending IP scan notification for {ip} via {notifier.get_name()}: {e}")
-"""
+
