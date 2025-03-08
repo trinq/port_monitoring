@@ -1650,10 +1650,19 @@ if __name__ == "__main__":
         logger.info("Test complete. Exiting.")
         sys.exit(0)
     
+    # Print a startup message
+    logger.info(f"Port monitor started in continuous monitoring mode")
+    logger.info(f"Scan interval: {monitor.scan_interval/60:.1f} minutes")
+    logger.info(f"Press Ctrl+C to stop the service")
+    
+    cycle_count = 0
     while not SHUTDOWN_REQUESTED:
+        cycle_count += 1
+        logger.info(f"Starting scan cycle #{cycle_count}")
         try:
             xml_file = monitor.run_scan()
             if xml_file:
+                logger.info(f"Scan completed successfully, processing results")
                 # For standard scan mode, process IP alerts if needed
                 # (In individual scan mode, alerts are already sent during the scan)
                 if monitor.individual_ip_alerts and not hasattr(monitor, '_run_individual_ip_scans'):
@@ -1674,6 +1683,7 @@ if __name__ == "__main__":
                     logger.info("Individual IP alerts are disabled in configuration")
                 
                 # Continue with existing functionality to detect changes
+                logger.info("Comparing current scan with previous results")
                 current_scan = monitor.parse_scan_results(xml_file)
                 previous_scan_file = monitor.get_latest_history_file()
                 if previous_scan_file:
@@ -1691,8 +1701,28 @@ if __name__ == "__main__":
                     monitor.send_teams_notification(changes)
                 else:
                     logger.info("No changes detected")
+            else:
+                logger.warning("Scan failed or was skipped, will retry in next cycle")
         except Exception as e:
             logger.error(f"Error during main loop: {e}")
+            logger.error("Despite error, service will continue with next scan cycle")
         
-        # Wait for the next scan interval
-        time.sleep(monitor.scan_interval)
+        # Calculate next scan time
+        next_scan_time = datetime.now() + timedelta(seconds=monitor.scan_interval)
+        logger.info(f"Scan cycle #{cycle_count} completed. Next scan scheduled at {next_scan_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"Waiting {monitor.scan_interval/60:.1f} minutes until next scan cycle...")
+        
+        # Wait for the next scan interval with periodic check for shutdown
+        remaining_wait = monitor.scan_interval
+        check_interval = min(60, monitor.scan_interval)  # Check at least every minute or at scan interval
+        
+        while remaining_wait > 0 and not SHUTDOWN_REQUESTED:
+            sleep_time = min(check_interval, remaining_wait)
+            time.sleep(sleep_time)
+            remaining_wait -= sleep_time
+        
+        if SHUTDOWN_REQUESTED:
+            logger.info("Shutdown requested, stopping service")
+            break
+            
+        logger.info("Wait complete, starting new scan cycle")
