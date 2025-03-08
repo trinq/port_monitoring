@@ -176,4 +176,76 @@ class NmapScanner(BaseScanner):
             
             for host_elem in sample_hosts:
                 addr_elem = host_elem.find('./address')
-                if addr_elem is None or addr_elem.get('
+                if addr_elem is None or addr_elem.get('addrtype') != 'ipv4':
+                    continue
+                    
+                ip = addr_elem.get('addr')
+                logging.debug(f"Verifying host: {ip}")
+                
+                # Check a sample of ports
+                for port in self.verification_ports:
+                    try:
+                        port = int(port.strip())
+                        # Check if this port is reported as open in the scan
+                        port_open_in_scan = False
+                        
+                        # Find all ports for this host
+                        ports_elem = host_elem.findall('./ports/port')
+                        for port_elem in ports_elem:
+                            if port_elem.get('portid') == str(port):
+                                state_elem = port_elem.find('./state')
+                                if state_elem is not None and state_elem.get('state') == 'open':
+                                    port_open_in_scan = True
+                                    break
+                        
+                        # Verify the port directly
+                        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                        sock.settimeout(self.verification_timeout)
+                        result = sock.connect_ex((ip, port))
+                        sock.close()
+                        
+                        port_open_direct = (result == 0)
+                        
+                        # Compare results
+                        if port_open_in_scan == port_open_direct:
+                            logging.debug(f"Port {port} verification successful for {ip}")
+                        else:
+                            logging.warning(f"Port {port} verification failed for {ip}: scan={port_open_in_scan}, direct={port_open_direct}")
+                            
+                    except Exception as e:
+                        logging.error(f"Error verifying port {port} on {ip}: {e}")
+                
+                success_count += 1
+            
+            # If we successfully verified at least one host, consider it a success
+            verification_success = success_count > 0
+            logging.info(f"Deep verification {'passed' if verification_success else 'failed'}: {success_count}/{sample_size} hosts verified")
+            return verification_success
+            
+        except Exception as e:
+            logging.error(f"Error during deep verification: {e}")
+            return False
+    
+    def _create_nmap_command(self, xml_output: str, normal_output: str) -> List[str]:
+        """Create the nmap command with appropriate arguments"""
+        ip_list_file = self.config.get_ip_list_file()
+        
+        cmd = [
+            "nmap", "-sS", "-sV", "-T4", "-Pn", "-n",
+            "--scan-delay", self.config.get('Scan', 'scan_delay', fallback='0.5s'),
+            "--max-rate", self.config.get('Scan', 'max_rate', fallback='100'),
+            "--randomize-hosts",
+        ]
+        
+        # Add custom ports if specified
+        ports = self.config.get('Scan', 'ports', fallback='')
+        if ports:
+            cmd.extend(["-p", ports])
+        
+        # Add output options
+        cmd.extend(["-oX", xml_output, "-oN", normal_output])
+        
+        # Add target IPs from file
+        cmd.extend(["-iL", ip_list_file])
+        
+        return cmd
