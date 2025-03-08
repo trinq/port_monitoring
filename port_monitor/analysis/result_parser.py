@@ -96,4 +96,3 @@ class ResultParser:
         except Exception as e:
             logging.error(f"Error parsing XML scan file: {e}")
             return None
-"""

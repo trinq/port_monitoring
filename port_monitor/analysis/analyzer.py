@@ -74,4 +74,3 @@ class ResultAnalyzer:
             True if any changes were detected, False otherwise
         """
         return bool(changes["new_hosts"] or changes["new_ports"] or changes["closed_ports"])
-"""

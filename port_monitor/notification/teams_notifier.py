@@ -263,4 +263,3 @@ class TeamsNotifier(ChangeNotifier, ScanNotifier):
         })
         
         return card
-"""

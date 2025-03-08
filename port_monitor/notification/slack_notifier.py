@@ -234,4 +234,3 @@ class SlackNotifier(ChangeNotifier, ScanNotifier):
         })
         
         return blocks
-"""
