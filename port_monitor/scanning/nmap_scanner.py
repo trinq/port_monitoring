@@ -151,52 +151,98 @@ class NmapScanner(BaseScanner):
                 # If scan was successful, send the individual IP scan result notification
                 if success and notification_manager and getattr(self._parent, 'result_parser', None):
                     try:
-                        # Parse individual scan result
-                        parser = getattr(self._parent, 'result_parser')
-                        logging.info(f"Found result parser: {parser is not None}")
-                        logging.info(f"Parsing scan file: {ip_xml_output}")
-                        ip_scan_result = parser.parse_xml(ip_xml_output)
-                        logging.info(f"Found {len(ip_scan_result.get('hosts', {}))} hosts in scan file")
+                        # Create a more direct way to get host results
+                        logging.info(f"Reading scan results from {ip_xml_output}")
                         
-                        # Log the IP we're processing for debugging
-                        logging.debug(f"Processing IP: {ip}")
-                        
-                        if ip_scan_result and ip_scan_result.get('hosts', {}):
-                            hosts = ip_scan_result.get('hosts', {})
-                            logging.info(f"Hosts in result: {list(hosts.keys())}")
+                        # Direct XML parsing approach for this specific IP
+                        try:
+                            import xml.etree.ElementTree as ET
+                            tree = ET.parse(ip_xml_output)
+                            root = tree.getroot()
                             
-                            # Get the first host from the results if it exists
-                            # This handles cases where IP in XML might be formatted differently than the input IP
-                            if len(hosts) > 0:
-                                actual_ip = list(hosts.keys())[0]  # Use the first host found in results
-                                logging.info(f"Using host data from {actual_ip} for IP {ip}")
+                            # Check directly for host elements
+                            hosts_found = root.findall('./host')
+                            logging.info(f"Direct XML parsing found {len(hosts_found)} hosts")
+                            
+                            if hosts_found:
+                                # Get IP address from the first host
+                                addr_elem = hosts_found[0].find('./address')
+                                actual_ip = addr_elem.get('addr') if addr_elem is not None else ip
+                                logging.info(f"Found actual IP in scan: {actual_ip}")
                                 
-                                # Extract data for this IP
-                                host_data = hosts[actual_ip]
-                                timestamp = ip_scan_result.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                                # Get status
+                                status_elem = hosts_found[0].find('./status')
+                                status = status_elem.get('state', 'unknown') if status_elem is not None else 'unknown'
                                 
-                                # Log port information
-                                port_count = len(host_data.get('ports', {}))
-                                logging.info(f"Found {port_count} open ports for {actual_ip}")
-                                if port_count > 0:
-                                    for port, port_info in host_data.get('ports', {}).items():
-                                        logging.debug(f"Port {port}: {port_info.get('service', 'unknown')}/{port_info.get('state', 'unknown')}")
+                                # Get ports
+                                ports_dict = {}
+                                for port_elem in hosts_found[0].findall('./ports/port'):
+                                    port_id = port_elem.get('portid')
+                                    protocol = port_elem.get('protocol')
+                                    port_key = f"{port_id}/{protocol}"
+                                    
+                                    # Check if port is open
+                                    state_elem = port_elem.find('./state')
+                                    if state_elem is not None and state_elem.get('state') == 'open':
+                                        # Get service info
+                                        service_info = {
+                                            'state': 'open',
+                                            'reason': state_elem.get('reason', ''),
+                                        }
+                                        
+                                        service_elem = port_elem.find('./service')
+                                        if service_elem is not None:
+                                            service_info.update({
+                                                'name': service_elem.get('name', ''),
+                                                'product': service_elem.get('product', ''),
+                                                'version': service_elem.get('version', ''),
+                                                'extrainfo': service_elem.get('extrainfo', '')
+                                            })
+                                        
+                                        ports_dict[port_key] = service_info
+                                        logging.debug(f"Found open port {port_key}: {service_info}")
                                 
-                                # Prepare scan data
+                                # Prepare scan data manually
+                                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                                 scan_data = {
                                     'timestamp': timestamp,
-                                    'ports': host_data.get('ports', {}),
-                                    'port_count': port_count,
-                                    'os': host_data.get('os', ''),
-                                    'status': host_data.get('status', 'unknown')
+                                    'ports': ports_dict,
+                                    'port_count': len(ports_dict),
+                                    'status': status
                                 }
                                 
-                                # Send notification for this IP result
-                                logging.info(f"Sending scan result notification for {ip} with {port_count} ports")
+                                # Send notification with the manually parsed data
+                                logging.info(f"Sending scan result notification for {ip} with {len(ports_dict)} ports")
                                 notification_manager.notify_ip_scanned(ip, scan_data, position=idx, total=total_ips)
                                 logging.info(f"Sent scan result notification for IP: {ip} ({idx}/{total_ips})")
                             else:
-                                logging.warning(f"No hosts found in scan results for {ip}")
+                                logging.warning(f"No host elements found in XML for IP {ip}")
+                                
+                        except Exception as xml_parse_err:
+                            logging.error(f"Direct XML parsing failed: {xml_parse_err}")
+                            
+                            # Fallback to the original parser as a backup
+                            parser = getattr(self._parent, 'result_parser')
+                            ip_scan_result = parser.parse_xml(ip_xml_output)
+                            
+                            if ip_scan_result and ip_scan_result.get('hosts', {}):
+                                hosts = ip_scan_result.get('hosts', {})
+                                if len(hosts) > 0:
+                                    # Use the first host found
+                                    actual_ip = list(hosts.keys())[0]
+                                    host_data = hosts[actual_ip]
+                                    
+                                    # Prepare scan data
+                                    scan_data = {
+                                        'timestamp': host_data.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
+                                        'ports': host_data.get('ports', {}),
+                                        'port_count': len(host_data.get('ports', {})),
+                                        'status': host_data.get('status', 'unknown')
+                                    }
+                                    
+                                    # Send notification
+                                    notification_manager.notify_ip_scanned(ip, scan_data, position=idx, total=total_ips)
+                                    logging.info(f"Sent scan result notification using fallback parser for IP: {ip} ({idx}/{total_ips})")
                     except Exception as e:
                         logging.error(f"Error sending scan result notification for {ip}: {e}")
             except Exception as e:
