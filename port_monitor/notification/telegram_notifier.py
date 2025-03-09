@@ -209,7 +209,16 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                 # Format the ports list in a compact format
                 port_list = []
                 if ports:
-                    sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                    # Add safer port sorting that can handle non-numeric port values
+                    def safe_port_sort(port_str):
+                        try:
+                            # Handle standard port/protocol format
+                            return int(port_str.split('/')[0])
+                        except (ValueError, IndexError):
+                            # Return a high number for non-standard formats to put them at the end
+                            return 999999
+                    
+                    sorted_ports = sorted(ports.keys(), key=safe_port_sort)
                     port_list = sorted_ports
                 
                 # Create a compact representation of the ports
@@ -237,7 +246,16 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                     # Format the ports list in a compact format
                     port_list = []
                     if ports:
-                        sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        # Add safer port sorting that can handle non-numeric port values
+                        def safe_port_sort(port_str):
+                            try:
+                                # Handle standard port/protocol format
+                                return int(port_str.split('/')[0])
+                            except (ValueError, IndexError):
+                                # Return a high number for non-standard formats to put them at the end
+                                return 999999
+                        
+                        sorted_ports = sorted(ports.keys(), key=safe_port_sort)
                         port_list = sorted_ports
                     
                     # Create a compact representation of the ports
@@ -255,7 +273,16 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                 for ip in sorted_ips:
                     ports = changes.get('new_ports', {}).get(ip, {})
                     if ports:
-                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        # Add safer port sorting that can handle non-numeric port values
+                        def safe_port_sort(port_str):
+                            try:
+                                # Handle standard port/protocol format
+                                return int(port_str.split('/')[0])
+                            except (ValueError, IndexError):
+                                # Return a high number for non-standard formats to put them at the end
+                                return 999999
+                        
+                        port_list = sorted(ports.keys(), key=safe_port_sort)
                         ports_str = ", ".join(port_list)
                         message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
             else:
@@ -270,7 +297,16 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                 for ip in sorted_ips:
                     ports = changes.get('closed_ports', {}).get(ip, {})
                     if ports:
-                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        # Add safer port sorting that can handle non-numeric port values
+                        def safe_port_sort(port_str):
+                            try:
+                                # Handle standard port/protocol format
+                                return int(port_str.split('/')[0])
+                            except (ValueError, IndexError):
+                                # Return a high number for non-standard formats to put them at the end
+                                return 999999
+                        
+                        port_list = sorted(ports.keys(), key=safe_port_sort)
                         ports_str = ", ".join(port_list)
                         message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
             else:
