@@ -1,204 +1,266 @@
 # Port Monitoring System
 
-This is a 24/7 port monitoring solution that performs regular port scans on a list of IP addresses, compares results with historical data, and alerts on changes such as newly opened ports. The system also provides real-time alerts for each IP address as it's scanned.
+## Overview
+
+The Port Monitoring System is a comprehensive solution for continuous monitoring of network ports across multiple IP addresses. It automatically detects changes in port status, including new open ports and closed ports, and sends notifications through multiple channels (Email, Slack, Teams, and Telegram).
+
+## Quick Start
+
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure the System**:
+   - Copy `port_monitor.conf.example` to `port_monitor.conf`
+   - Edit the configuration file with your settings
+   - Create an IP list file (default: `unique_ips.txt`)
+
+3. **Run the Monitor**:
+   ```bash
+   python -m port_monitor
+   ```
 
 ## Features
 
-- Continuous port scanning based on configurable intervals
-- **Real-time alerts for each IP as it's scanned**
-- **Optional scan start notifications for tracking scan progress**
-- Detection of new hosts, new open ports, and closed ports
-- Email, Slack, and Telegram notifications for detected changes
-- Historical data storage for comparison
-- Configurable scan parameters
-- Detailed logging with debug mode
-- Retry mechanisms for reliability
-- Scan result verification
-- Test mode for validating notification configuration
+- **Continuous Port Scanning**: Automatically scans IP addresses at configurable intervals
+- **Change Detection**: Identifies new hosts, new open ports, and closed ports
+- **Multi-Channel Notifications**: Supports Email, Slack, Teams, and Telegram
+- **Detailed Reporting**: Provides comprehensive summaries of scan results
+- **Sequential Scanning**: Scans IPs one by one to avoid network congestion
+- **Robust Error Handling**: Includes retry mechanisms and detailed logging
 
-## Prerequisites
+## Configuration File (port_monitor.conf)
 
-- Python 3.6+
-- nmap
-- Network access to target IPs
-- (Optional) SMTP server for email alerts
-- (Optional) Slack webhook for Slack alerts
-- (Optional) Telegram bot for Telegram alerts
+The system is configured through a single configuration file with the following sections:
 
-## Installation
-
-1. Clone/download this repository or copy the provided files.
-2. Run the setup script:
-   ```bash
-   chmod +x setup.sh
-   ./setup.sh
-   ```
-
-## Configuration
-
-Edit the `port_monitor.conf` file to customize your monitoring setup:
-
-### General Configuration
+### General Settings
 
 ```ini
 [General]
+# Directory for storing scan results and history
 output_dir = ./port_monitor_output
+# Log level (DEBUG, INFO, WARNING, ERROR)
+log_level = INFO
+```
 
+### Scan Settings
+
+```ini
 [Scan]
-# File containing list of IP addresses to scan
+# File containing list of IP addresses to scan (one per line)
 ip_list_file = unique_ips.txt
-# How often to run scans (in minutes)
+
+# Scan interval in minutes (how often to run scans)
+# Default: 240 (4 hours)
 scan_interval_minutes = 240
-# Scan delay between probes
+
+# Scan parameters
+# Delay between probes (in seconds or with units like 0.5s)
 scan_delay = 0.5s
-# Maximum rate of packet transmission
+# Maximum packet transmission rate
 max_rate = 100
-# Port ranges to scan
+# Port ranges to scan (comma-separated)
 ports = 1-1000,1022-1099,1433-1434,1521,2222,3306-3310,3389,5432,5900-5910,8000-8999
+# Scan timing template (0-5, higher is faster but less reliable)
+timing_template = 3
+# Additional nmap arguments
+additional_args = 
 ```
 
-### IP Address List
+### Notification Settings
 
-Create a file named `unique_ips.txt` containing one IP address per line:
-```
-192.168.1.1
-10.0.0.1
-172.16.1.1
-```
-
-### Notification Configuration
-
-Enable or disable notifications globally:
 ```ini
 [Notification]
+# Enable or disable all notifications
 enabled = true
-# Enable alerts for each scanned IP (in addition to change alerts)
+
+# Enable notifications for each individual IP scan
 individual_ip_alerts = true
-# Enable notifications when IP scans begin (useful for tracking)
+
+# Enable notifications when IP scans begin
 send_scan_start_alerts = false
 ```
 
-#### Email Notifications
+### Email Notifications
 
 ```ini
 [Email]
+# Enable or disable email notifications
 enabled = false
+
+# SMTP server configuration
 smtp_server = smtp.example.com
 smtp_port = 587
 smtp_user = username
 smtp_password = password
+use_tls = true
+
+# Email addresses
 sender_email = alerts@example.com
 recipient_emails = admin@example.com,security@example.com
+
+# Email content
+subject_prefix = [Port Monitor]
 ```
 
-To enable email notifications:
-1. Set `enabled = true` in the Email section
-2. Configure your SMTP server details
-3. Specify sender and recipient email addresses
-
-#### Slack Notifications
+### Slack Notifications
 
 ```ini
 [Slack]
+# Enable or disable Slack notifications
 enabled = false
+
+# Slack webhook URL (from Slack API)
 webhook_url = https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK
 ```
 
-To enable Slack notifications:
-1. Set `enabled = true` in the Slack section
-2. Create a Slack webhook at https://api.slack.com/messaging/webhooks
-3. Add the webhook URL to the configuration
+### Teams Notifications
 
-#### Telegram Notifications
+```ini
+[Teams]
+# Enable or disable Microsoft Teams notifications
+enabled = false
+
+# Teams webhook URL
+webhook_url = https://outlook.office.com/webhook/YOUR/TEAMS/WEBHOOK
+```
+
+### Telegram Notifications
 
 ```ini
 [Telegram]
+# Enable or disable Telegram notifications
 enabled = false
+
+# Telegram bot token (from BotFather)
 bot_token = YOUR_BOT_TOKEN
+
+# Chat ID to send messages to
 chat_id = YOUR_CHAT_ID
+
+# Maximum retries for failed API calls
+max_retries = 3
 ```
 
-To enable Telegram notifications:
-1. Set `enabled = true` in the Telegram section
-2. Create a Telegram bot by messaging [@BotFather](https://t.me/botfather) on Telegram
-3. Get your bot token from BotFather
-4. Start a chat with your bot
-5. Get your chat ID (you can use [@getidsbot](https://t.me/getidsbot) or other methods)
-6. Add the bot token and chat ID to the configuration
+## Command Line Options
 
-## Usage
+The system supports various command line options:
 
-### Running Manually
+```
+Usage: python -m port_monitor [OPTIONS]
 
-Run the port monitor manually with:
-```bash
-python3 port_monitor.py
+Options:
+  -c, --config FILE       Path to configuration file (default: port_monitor.conf)
+  -d, --debug             Enable debug logging
+  -t, --test              Run in test mode (scan only one IP)
+  --test-ip IP            Specify IP to test
+  --test-notification     Test the notification system
+  --test-ip-alert IP      Test IP scan notification for a specific IP
+  --version               Show version information
+  -h, --help              Show this help message
 ```
 
-Or with a custom configuration file:
-```bash
-python3 port_monitor.py -c /path/to/custom_config.conf
-```
+## Running as a Service
 
-### Debug Mode
+### Using Systemd (Linux)
 
-Enable detailed logging with the debug flag:
-```bash
-python3 port_monitor.py --debug
-```
+1. Create a systemd service file:
+   ```bash
+   sudo nano /etc/systemd/system/port-monitor.service
+   ```
 
-### Test Notifications
+2. Add the following content:
+   ```ini
+   [Unit]
+   Description=Port Monitoring Service
+   After=network.target
 
-Test notification system for a specific IP without running a full scan:
-```bash
-python3 port_monitor.py --test-ip-alert 192.168.1.1
-```
+   [Service]
+   User=your_username
+   WorkingDirectory=/path/to/port_monitor
+   ExecStart=/usr/bin/python3 -m port_monitor
+   Restart=on-failure
 
-### Running as a Service
+   [Install]
+   WantedBy=multi-user.target
+   ```
 
-During installation, you can choose to set up a cron job that will run the monitor automatically according to your configured schedule.
+3. Enable and start the service:
+   ```bash
+   sudo systemctl enable port-monitor.service
+   sudo systemctl start port-monitor.service
+   ```
 
-To set up a cron job manually:
-```bash
-crontab -e
-```
+### Using Cron
 
-Add a line like:
-```
-0 */4 * * * cd /path/to/port_monitor && ./port_monitor.py >> port_monitor.log 2>&1
-```
+1. Edit your crontab:
+   ```bash
+   crontab -e
+   ```
 
-This example runs the monitor every 4 hours.
+2. Add a line to run the monitor at your desired interval:
+   ```
+   0 */4 * * * cd /path/to/port_monitor && python3 -m port_monitor >> port_monitor.log 2>&1
+   ```
 
-## Output and Logs
+## Notification Types
 
-- Scan results are stored in the `output_dir` specified in the configuration
-- Historical scans are kept in the `history` subdirectory for comparison
-- Logs are written to `port_monitor.log`
+The system provides three types of notifications:
 
-## Notifications
+### 1. Scan Completion Notifications
 
-The system provides two types of notifications:
+Sent after all IPs have been scanned, including:
+- Scan ID and completion status
+- Summary of all hosts with their open ports
+- New hosts detected since the last scan
+- New open ports on existing hosts
+- Ports that have been closed since the last scan
 
-### 1. Individual IP Scan Alerts
+### 2. Individual IP Scan Notifications
 
-Sent immediately after each IP address is scanned (when `individual_ip_alerts = true`):
-- IP address that was scanned
-- List of all open ports found on that IP
-- Service details for each open port
-- Scan timestamp
+Sent immediately after each IP is scanned (when `individual_ip_alerts = true`):
+- IP address scanned
+- List of all open ports found
+- Service details for each port
 
-### 2. Change Detection Alerts
+### 3. Scan Start Notifications
 
-Sent when changes are detected between the current scan and previous scan:
-- List of new hosts and their open ports
-- List of new open ports on existing hosts
-- List of ports that have been closed since the last scan
-- Scan metadata (time, system information)
+Sent when a scan begins for an IP (when `send_scan_start_alerts = true`):
+- IP address being scanned
+- Scan ID
+- Start time
 
-### 3. Scan Start Alerts (Optional)
+## Troubleshooting
 
-Sent when a scan begins for an IP address (when `send_scan_start_alerts = true`):
+### Common Issues
+
+1. **No notifications received**:
+   - Check that notifications are enabled in the configuration
+   - Verify credentials for the notification service
+   - Check the log file for error messages
+
+2. **Scan interval too long**:
+   - Adjust `scan_interval_minutes` in the configuration file
+
+3. **Missing scan results**:
+   - Ensure the output directory is writable
+   - Check for network connectivity issues
+
+### Logs
+
+Logs are stored in `port_monitor.log` in the application directory. For more detailed logs, run with the `--debug` flag.
+
+## Security Considerations
+
+- The system stores scan results which may contain sensitive information about your network
+- Credentials for notification services are stored in plain text in the configuration file
+- Consider running the system with limited privileges
+- Restrict access to the configuration file and output directory
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 - IP address being scanned
 - Attempt number and max retries
 - Timestamp
