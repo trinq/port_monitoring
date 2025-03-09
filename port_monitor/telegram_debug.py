@@ -19,7 +19,9 @@ logging.basicConfig(
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import notification components
-from port_monitor.notification.telegram_notifier import TelegramNotifier
+# Use a direct import instead of a package import
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from notification.telegram_notifier import TelegramNotifier
 
 def create_test_scan_results():
     """Create sample scan results for testing"""
@@ -81,14 +83,38 @@ def create_test_changes():
 
 def main():
     """Run a test Telegram notification"""
-    from port_monitor.config.app_config import AppConfig
+    import configparser
+    import os
     
-    # Load configuration
-    config = AppConfig()
-    config_data = config.get_config()
+    # Load configuration directly from the port_monitor.conf file
+    config = configparser.ConfigParser()
+    conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'port_monitor.conf')
+    
+    if not os.path.exists(conf_path):
+        logging.error(f"Configuration file not found: {conf_path}")
+        return False
+        
+    config.read(conf_path)
+    logging.info(f"Loaded configuration from {conf_path}")
+    
+    # Check if Telegram configuration exists
+    if not config.has_section('telegram'):
+        logging.error("No Telegram section found in configuration file")
+        return False
+    
+    # Get Telegram configuration
+    telegram_config = {
+        'bot_token': config.get('telegram', 'bot_token', fallback=''),
+        'chat_id': config.get('telegram', 'chat_id', fallback='')
+    }
+    
+    # Check if Telegram configuration is valid
+    if not telegram_config['bot_token'] or not telegram_config['chat_id']:
+        logging.error("Invalid Telegram configuration: missing bot_token or chat_id")
+        return False
     
     # Create a Telegram notifier
-    notifier = TelegramNotifier(config_data)
+    notifier = TelegramNotifier(telegram_config)
     
     # Create test data
     scan_results = create_test_scan_results()
@@ -99,6 +125,7 @@ def main():
     logging.info(f"Test changes: {json.dumps(changes, indent=2)}")
     
     # Send a test notification
+    logging.info("Sending test notification to Telegram...")
     success = notifier.notify_scan_completed(
         scan_id="TEST_SCAN_001",
         success=True,
