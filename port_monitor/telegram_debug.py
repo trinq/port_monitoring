@@ -88,7 +88,24 @@ def main():
     
     # Load configuration directly from the port_monitor.conf file
     config = configparser.ConfigParser()
-    conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'port_monitor.conf')
+    
+    # Try multiple possible config file locations
+    possible_paths = [
+        # Current directory
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), 'port_monitor.conf'),
+        # Parent directory
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'port_monitor.conf'),
+        # Specific path from error message
+        '/home/ubuntu/project/port_monitoring/port_monitor.conf'
+    ]
+    
+    # Find the first existing config file
+    conf_path = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            conf_path = path
+            logging.info(f"Found configuration file at: {path}")
+            break
     
     if not os.path.exists(conf_path):
         logging.error(f"Configuration file not found: {conf_path}")

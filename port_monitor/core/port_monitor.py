@@ -130,20 +130,42 @@ class PortMonitor:
                 # Get current scan results for detailed notification
                 xml_file_path = scan_result_file  # This is the path to the combined XML file
                 
-                # Parse results for notification details
-                current_results = self.result_parser.parse_xml(xml_file_path)
+                # Try to use the structured data stored in the scanner first
+                structured_data_attr = f"_structured_data_{scan_id}"
+                current_results = None
                 
-                # Add detailed debug logging
-                if current_results:
-                    logging.info(f"Parsed scan results successfully: {scan_results}")
-                    if 'hosts' in current_results:
-                        logging.info(f"Number of hosts in scan results: {len(current_results['hosts'])}")
+                # Check if the scanner has the structured data attribute
+                if hasattr(self.scanner, structured_data_attr):
+                    current_results = getattr(self.scanner, structured_data_attr)
+                    logging.info(f"Using structured data from scanner attribute: {structured_data_attr}")
+                    
+                    # Add detailed debug logging for the structured data
+                    if current_results and 'hosts' in current_results:
+                        host_count = len(current_results['hosts'])
+                        logging.info(f"Found {host_count} hosts in structured data")
+                        
                         for ip, host_data in current_results.get('hosts', {}).items():
-                            logging.info(f"Host details for {ip}: {len(host_data.get('ports', {}))} open ports")
+                            port_count = len(host_data.get('ports', {}))
+                            logging.info(f"Structured data for {ip}: {port_count} open ports")
                     else:
-                        logging.warning("No 'hosts' key found in scan results")
-                else:
-                    logging.error("Failed to parse scan results for notification")
+                        logging.warning("No hosts found in structured data, or structured data is invalid")
+                
+                # Fallback to parsing the XML file if structured data is not available
+                if not current_results or 'hosts' not in current_results or not current_results['hosts']:
+                    logging.info("Falling back to XML parsing")
+                    current_results = self.result_parser.parse_xml(xml_file_path)
+                    
+                    # Add detailed debug logging for the parsed results
+                    if current_results:
+                        logging.info(f"Parsed scan results successfully from XML: {xml_file_path}")
+                        if 'hosts' in current_results:
+                            logging.info(f"Number of hosts in XML results: {len(current_results['hosts'])}")
+                            for ip, host_data in current_results.get('hosts', {}).items():
+                                logging.info(f"Host details for {ip}: {len(host_data.get('ports', {}))} open ports")
+                        else:
+                            logging.warning("No 'hosts' key found in parsed XML results")
+                    else:
+                        logging.error("Failed to parse scan results from XML")
                 
                 # Get changes (if any)
                 previous_scan_file = self._get_latest_history_file()

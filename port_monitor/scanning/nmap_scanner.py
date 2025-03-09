@@ -7,6 +7,7 @@ import subprocess
 import shutil
 import random
 import time
+import json
 import logging
 import socket
 from datetime import datetime
@@ -253,12 +254,14 @@ class NmapScanner(BaseScanner):
             logging.error("No individual IP scans were successful")
             return None
         
-        # Let's save all the scan data for each IP in memory to build a comprehensive combined XML file
+        # Store both XML host elements and structured data for each IP to use in notifications
         all_hosts_data = []
+        combined_hosts_dict = {}
+        
         for ip, xml_file, _ in individual_results:
             try:
                 logging.info(f"Processing XML file {xml_file} for IP {ip}")
-                # Parse the individual XML file to extract all information
+                # Parse the individual XML file to extract all information for XML combination
                 try:
                     tree = ET.parse(xml_file)
                     root = tree.getroot()
@@ -267,12 +270,74 @@ class NmapScanner(BaseScanner):
                     if host_elements:
                         logging.info(f"Found {len(host_elements)} host elements in {xml_file}")
                         all_hosts_data.append((ip, host_elements[0]))
+                        
+                        # Also extract structured data for this host for notifications
+                        host_element = host_elements[0]
+                        status = 'unknown'
+                        status_elem = host_element.find('./status')
+                        if status_elem is not None:
+                            status = status_elem.get('state', 'unknown')
+                            
+                        # Extract port information
+                        ports_dict = {}
+                        ports_elem = host_element.findall('./ports/port')
+                        for port_elem in ports_elem:
+                            port_id = port_elem.get('portid')
+                            protocol = port_elem.get('protocol')
+                            port_key = f"{port_id}/{protocol}"
+                            
+                            # Check if port is open
+                            state_elem = port_elem.find('./state')
+                            if state_elem is not None and state_elem.get('state') == 'open':
+                                # Get service info
+                                service_info = {
+                                    'state': 'open',
+                                    'reason': state_elem.get('reason', ''),
+                                }
+                                
+                                service_elem = port_elem.find('./service')
+                                if service_elem is not None:
+                                    service_info.update({
+                                        'name': service_elem.get('name', ''),
+                                        'product': service_elem.get('product', ''),
+                                        'version': service_elem.get('version', ''),
+                                        'extrainfo': service_elem.get('extrainfo', '')
+                                    })
+                                
+                                ports_dict[port_key] = service_info
+                        
+                        # Save structured data for this host
+                        combined_hosts_dict[ip] = {
+                            'status': status,
+                            'ports': ports_dict,
+                            'port_count': len(ports_dict)
+                        }
+                        logging.info(f"Saved structured data for {ip} with {len(ports_dict)} ports")
+                        
                     else:
                         logging.warning(f"No host elements found in {xml_file}")
                 except Exception as e:
                     logging.error(f"Error parsing XML file {xml_file}: {e}")
             except Exception as e:
                 logging.error(f"Error processing file {xml_file} for IP {ip}: {e}")
+                
+        # Save the combined structured data as a JSON file for notification purposes
+        combined_structured_data = {
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'hosts': combined_hosts_dict
+        }
+        
+        # Write the structured data to a JSON file for debugging
+        json_output = os.path.join(self.output_dir, f"scan_{scan_id}_structured.json")
+        try:
+            with open(json_output, 'w') as f:
+                json.dump(combined_structured_data, f, indent=2)
+            logging.info(f"Saved structured data to {json_output}")
+        except Exception as e:
+            logging.error(f"Error saving structured data to JSON: {e}")
+            
+        # Store the structured data as an attribute for use in notifications
+        setattr(self, f"_structured_data_{scan_id}", combined_structured_data)
             
         # Create combined XML output with all parsed data
         with open(final_xml_output, 'w') as f:
