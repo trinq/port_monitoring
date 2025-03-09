@@ -132,8 +132,18 @@ class NotificationManager:
             except Exception as e:
                 logging.error(f"Error sending scan start notification via {notifier.get_name()}: {e}")
     
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> None:
-        """Send notifications about scan completion to all enabled scan notifiers"""
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                             scan_results=None, changes=None) -> None:
+        """Send notifications about scan completion to all enabled scan notifiers
+        
+        Args:
+            scan_id: Unique ID of the scan
+            success: Whether the scan completed successfully
+            scanned: Number of targets successfully scanned
+            total: Total number of targets
+            scan_results: Optional dictionary containing the scan results
+            changes: Optional dictionary containing changes since the last scan
+        """
         # Find all enabled scan notifiers
         scan_notifiers = [n for n in self.notifiers 
                          if isinstance(n, ScanNotifier) and n.is_enabled()]
@@ -144,7 +154,8 @@ class NotificationManager:
         # Send notifications
         for notifier in scan_notifiers:
             try:
-                notif_success = notifier.notify_scan_completed(scan_id, success, scanned, total)
+                notif_success = notifier.notify_scan_completed(scan_id, success, scanned, total, 
+                                                            scan_results=scan_results, changes=changes)
                 if notif_success:
                     logging.info(f"Successfully sent scan completion notification via {notifier.get_name()}")
                 else:

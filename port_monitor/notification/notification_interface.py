@@ -55,7 +55,8 @@ class ScanNotifier(BaseNotifier):
         pass
     
     @abstractmethod
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> bool:
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                              scan_results: Dict[str, Any] = None, changes: Dict[str, Any] = None) -> bool:
         """
         Send notification that a scan has completed
         
@@ -64,6 +65,8 @@ class ScanNotifier(BaseNotifier):
             success: Whether the scan completed successfully
             scanned: Number of targets successfully scanned
             total: Total number of targets
+            scan_results: Optional dictionary containing the scan results
+            changes: Optional dictionary containing changes since the last scan
             
         Returns:
             True if notification was sent successfully, False otherwise

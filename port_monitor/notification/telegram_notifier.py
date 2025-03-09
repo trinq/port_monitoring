@@ -158,12 +158,13 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         return self._send_telegram_message(message)
     
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> bool:
-        """Send Telegram notification about scan completion"""
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                              scan_results=None, changes=None) -> bool:
+        """Send Telegram notification about scan completion with detailed port information"""
         if not self.is_enabled():
             return False
             
-        logging.debug("Sending scan completion Telegram notification")
+        logging.debug("Sending scan completion Telegram notification with details")
         
         status = "✅ Successfully" if success else "❌ With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0
@@ -174,6 +175,68 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         message += f"<b>Completion Status:</b> {'Success' if success else 'Failed'}\n"
         message += f"<b>Scanned:</b> {scanned}/{total} IP addresses ({percentage:.1f}%)\n"
         message += f"<b>Completion Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        
+        # Add detailed port information for each IP if results are available
+        if scan_results and scan_results.get('hosts'):
+            message += "\n<b>📊 Scan Summary by IP:</b>\n"
+            
+            for ip, host_data in scan_results.get('hosts', {}).items():
+                port_count = len(host_data.get('ports', {}))
+                status = host_data.get('status', 'unknown')
+                
+                # Create a summary for this IP
+                message += f"\n<b>{ip}</b> ({status}) - {port_count} open ports\n"
+                
+                # List open ports with service information (up to 10 ports to avoid message too long)
+                ports = host_data.get('ports', {})
+                if ports:
+                    sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                    for i, port_key in enumerate(sorted_ports[:10]):
+                        port_info = ports[port_key]
+                        service_name = port_info.get('name', 'unknown')
+                        service_details = []
+                        
+                        # Add product and version if available
+                        if port_info.get('product'):
+                            service_details.append(port_info.get('product'))
+                        if port_info.get('version'):
+                            service_details.append(port_info.get('version'))
+                            
+                        service_str = f"{service_name}"
+                        if service_details:
+                            service_str += f" ({' '.join(service_details)})"
+                            
+                        message += f"  • Port {port_key}: {service_str}\n"
+                    
+                    # If more than 10 ports, show count of remaining
+                    if len(sorted_ports) > 10:
+                        message += f"  • <i>...and {len(sorted_ports) - 10} more ports</i>\n"
+                else:
+                    message += "  <i>No open ports detected</i>\n"
+        
+        # Add changes information if available
+        if changes and (changes.get('new_ports') or changes.get('closed_ports')):
+            message += "\n<b>🔄 Changes Since Last Scan:</b>\n"
+            
+            # New open ports
+            if changes.get('new_ports'):
+                message += "\n<b>📈 Newly Opened Ports:</b>\n"
+                for ip, ports in changes.get('new_ports', {}).items():
+                    if ports:
+                        message += f"<b>{ip}</b>\n"
+                        for port_key, port_info in ports.items():
+                            service = port_info.get('name', 'unknown')
+                            message += f"  • Port {port_key}: {service}\n"
+            
+            # Newly closed ports
+            if changes.get('closed_ports'):
+                message += "\n<b>📉 Newly Closed Ports:</b>\n"
+                for ip, ports in changes.get('closed_ports', {}).items():
+                    if ports:
+                        message += f"<b>{ip}</b>\n"
+                        for port_key, port_info in ports.items():
+                            service = port_info.get('name', 'unknown')
+                            message += f"  • Port {port_key}: {service}\n"
         
         message += f"\n<i>Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
         

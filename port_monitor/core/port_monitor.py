@@ -125,12 +125,31 @@ class PortMonitor:
             success = self._process_scan_results(scan_result_file, scan_id)
             self.state_manager.set_scan_completed(success=success)
             
-            # Send scan completed notification
+            # Send scan completed notification with detailed results
             try:
+                # Get current scan results for detailed notification
+                scan_results = scan_result_file  # This is the path to the combined XML file
+                
+                # Parse results for notification details
+                current_results = self.result_parser.parse_xml(scan_results)
+                
+                # Get changes (if any)
+                previous_scan_file = self._get_latest_history_file()
+                previous_results = None
+                changes = None
+                
+                if previous_scan_file:
+                    previous_results = self.result_parser.parse_xml(previous_scan_file)
+                    if previous_results:
+                        changes = self.analyzer.compare_scans(current_results, previous_results)
+                
+                # Send detailed completion notification
                 self.notification_manager.notify_scan_completed(
-                    scan_id, success, target_ips, target_ips)
+                    scan_id, success, target_ips, target_ips, 
+                    scan_results=current_results, changes=changes)
+                    
             except Exception as e:
-                logging.error(f"Error sending scan completion notification: {e}")
+                logging.error(f"Error sending scan completion notification: {e}", exc_info=True)
                 
             logging.info(f"Port monitoring cycle completed (success={success})")
             return success
@@ -138,12 +157,13 @@ class PortMonitor:
             logging.error("Scan failed, skipping analysis and notification")
             self.state_manager.set_scan_completed(success=False)
             
-            # Send scan completed notification
+            # Send scan completed notification for failure case
             try:
                 self.notification_manager.notify_scan_completed(
-                    scan_id, False, 0, target_ips)
+                    scan_id, False, 0, target_ips,
+                    scan_results=None, changes=None)
             except Exception as e:
-                logging.error(f"Error sending scan completion notification: {e}")
+                logging.error(f"Error sending scan completion notification: {e}", exc_info=True)
                 
             logging.info("Port monitoring cycle completed (success=False)")
             return False
