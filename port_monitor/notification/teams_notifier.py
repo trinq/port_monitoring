@@ -131,6 +131,153 @@ class TeamsNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         status = "Successfully" if success else "With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0
         
+        # Initialize the basic card structure
+        body = [
+            {
+                "type": "TextBlock",
+                "size": "medium",
+                "weight": "bolder",
+                "text": f"🏁 Port Scan Completed {status}"
+            },
+            {
+                "type": "FactSet",
+                "facts": [
+                    {
+                        "title": "Scan ID",
+                        "value": scan_id
+                    },
+                    {
+                        "title": "Status",
+                        "value": "Success" if success else "Failed"
+                    },
+                    {
+                        "title": "Scanned",
+                        "value": f"{scanned}/{total} IP addresses ({percentage:.1f}%)"
+                    },
+                    {
+                        "title": "Completion Time",
+                        "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    }
+                ]
+            }
+        ]
+        
+        # Add port monitoring summary if scan results are available
+        if scan_results and scan_results.get('hosts'):
+            # Add the summary header
+            body.append({
+                "type": "TextBlock",
+                "size": "medium",
+                "weight": "bolder",
+                "text": "Port Monitoring Summary",
+                "spacing": "medium"
+            })
+            
+            # Add host section header
+            body.append({
+                "type": "TextBlock",
+                "weight": "bolder",
+                "text": "All Scanned Hosts:"
+            })
+            
+            # Sort IPs numerically for better readability
+            sorted_ips = sorted(scan_results.get('hosts', {}).keys(), 
+                              key=lambda ip: [int(octet) for octet in ip.split('.')])
+            
+            # Create a list of hosts with their ports
+            for ip in sorted_ips:
+                host_data = scan_results.get('hosts', {}).get(ip, {})
+                ports = host_data.get('ports', {})
+                
+                # Format the ports list
+                port_list = []
+                if ports:
+                    sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                    port_list = sorted_ports
+                
+                # Create a compact representation of the ports
+                ports_str = ", ".join(port_list) if port_list else "None"
+                
+                # Add this host to the card
+                body.append({
+                    "type": "TextBlock",
+                    "text": f"• **{ip}** - Ports: {ports_str}",
+                    "wrap": True
+                })
+        
+        # Add changes information if available
+        if changes and isinstance(changes, dict):
+            # Add the changes header
+            body.append({
+                "type": "TextBlock",
+                "size": "medium",
+                "weight": "bolder",
+                "text": "Port Monitoring Alert",
+                "spacing": "medium"
+            })
+            
+            body.append({
+                "type": "TextBlock",
+                "text": "The following changes were detected in the latest scan:"
+            })
+            
+            # New Open Ports section
+            body.append({
+                "type": "TextBlock",
+                "weight": "bolder",
+                "text": "New Open Ports:",
+                "spacing": "medium"
+            })
+            
+            if changes.get('new_ports') and any(changes.get('new_ports', {}).values()):
+                sorted_ips = sorted(changes.get('new_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('new_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        body.append({
+                            "type": "TextBlock",
+                            "text": f"• **{ip}** - Ports: {ports_str}",
+                            "wrap": True
+                        })
+            else:
+                body.append({
+                    "type": "TextBlock",
+                    "text": "• None"
+                })
+            
+            # Closed Ports section
+            body.append({
+                "type": "TextBlock",
+                "weight": "bolder",
+                "text": "Closed Ports:",
+                "spacing": "medium"
+            })
+            
+            if changes.get('closed_ports') and any(changes.get('closed_ports', {}).values()):
+                sorted_ips = sorted(changes.get('closed_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('closed_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        body.append({
+                            "type": "TextBlock",
+                            "text": f"• **{ip}** - Ports: {ports_str}",
+                            "wrap": True
+                        })
+            else:
+                body.append({
+                    "type": "TextBlock",
+                    "text": "• None"
+                })
+        
+        # Create the final card
         card = {
             "type": "message",
             "attachments": [
@@ -138,35 +285,7 @@ class TeamsNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                     "contentType": "application/vnd.microsoft.card.adaptive",
                     "content": {
                         "type": "AdaptiveCard",
-                        "body": [
-                            {
-                                "type": "TextBlock",
-                                "size": "medium",
-                                "weight": "bolder",
-                                "text": f"🏁 Port Scan Completed {status}"
-                            },
-                            {
-                                "type": "FactSet",
-                                "facts": [
-                                    {
-                                        "title": "Scan ID",
-                                        "value": scan_id
-                                    },
-                                    {
-                                        "title": "Status",
-                                        "value": "Success" if success else "Failed"
-                                    },
-                                    {
-                                        "title": "Scanned",
-                                        "value": f"{scanned}/{total} IP addresses ({percentage:.1f}%)"
-                                    },
-                                    {
-                                        "title": "Completion Time",
-                                        "value": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                                    }
-                                ]
-                            }
-                        ],
+                        "body": body,
                         "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
                         "version": "1.2"
                     }

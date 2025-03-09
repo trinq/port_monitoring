@@ -122,6 +122,7 @@ class SlackNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         status = ":white_check_mark: Successfully" if success else ":x: With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0
         
+        # Prepare basic information section
         blocks = [
             {
                 "type": "header",
@@ -136,17 +137,121 @@ class SlackNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                     "type": "mrkdwn",
                     "text": f"The port scan has completed.\n*Scan ID:* {scan_id}\n*Completion Status:* {'Success' if success else 'Failed'}\n*Scanned:* {scanned}/{total} IP addresses ({percentage:.1f}%)\n*Completion Time:* {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 }
-            },
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-                    }
-                ]
             }
         ]
+        
+        # Add port monitoring summary if scan results are available
+        if scan_results and scan_results.get('hosts'):
+            # Create section for the summary header
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Port Monitoring Summary*"
+                }
+            })
+            
+            # Format all hosts with their open ports
+            summary_text = "*All Scanned Hosts:*\n"
+            
+            # Sort IPs numerically for better readability
+            sorted_ips = sorted(scan_results.get('hosts', {}).keys(), 
+                              key=lambda ip: [int(octet) for octet in ip.split('.')])
+            
+            for ip in sorted_ips:
+                host_data = scan_results.get('hosts', {}).get(ip, {})
+                ports = host_data.get('ports', {})
+                
+                # Format the ports list
+                port_list = []
+                if ports:
+                    sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                    port_list = sorted_ports
+                
+                # Create a compact representation of the ports
+                ports_str = ", ".join(port_list) if port_list else "None"
+                
+                # Add this host to the summary
+                summary_text += f"• *{ip}* - Ports: {ports_str}\n"
+            
+            # Add the summary section to blocks
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": summary_text
+                }
+            })
+        
+        # Add changes information if available
+        if changes and isinstance(changes, dict):
+            # Add header for changes
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Port Monitoring Alert*\nThe following changes were detected in the latest scan:"
+                }
+            })
+            
+            # New Open Ports section
+            new_ports_text = "*New Open Ports:*\n"
+            if changes.get('new_ports') and any(changes.get('new_ports', {}).values()):
+                sorted_ips = sorted(changes.get('new_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('new_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        new_ports_text += f"• *{ip}* - Ports: {ports_str}\n"
+            else:
+                new_ports_text += "• None\n"
+            
+            # Add new ports section
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": new_ports_text
+                }
+            })
+            
+            # Closed Ports section
+            closed_ports_text = "*Closed Ports:*\n"
+            if changes.get('closed_ports') and any(changes.get('closed_ports', {}).values()):
+                sorted_ips = sorted(changes.get('closed_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('closed_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        closed_ports_text += f"• *{ip}* - Ports: {ports_str}\n"
+            else:
+                closed_ports_text += "• None\n"
+            
+            # Add closed ports section
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": closed_ports_text
+                }
+            })
+        
+        # Add footer
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"Port Monitor | {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                }
+            ]
+        })
         return self._send_slack_message(blocks)
     
     def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:

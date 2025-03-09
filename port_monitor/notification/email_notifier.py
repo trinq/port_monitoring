@@ -138,8 +138,77 @@ class EmailNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
             <li><b>Completion Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</li>
             <li><b>System:</b> {os.uname().nodename}</li>
         </ul>
-        </body></html>
+        
+        <h3>Port Monitoring Summary</h3>
         """
+        
+        # Add summary port information for all hosts in a compact format
+        if scan_results and scan_results.get('hosts'):
+            body += "<h4>All Scanned Hosts:</h4>\n<ul>\n"
+            
+            # Sort IPs numerically for better readability
+            sorted_ips = sorted(scan_results.get('hosts', {}).keys(), 
+                              key=lambda ip: [int(octet) for octet in ip.split('.')])
+            
+            for ip in sorted_ips:
+                host_data = scan_results.get('hosts', {}).get(ip, {})
+                ports = host_data.get('ports', {})
+                
+                # Format the ports list in a compact format
+                port_list = []
+                if ports:
+                    sorted_ports = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                    port_list = sorted_ports
+                
+                # Create a compact representation of the ports
+                ports_str = ", ".join(port_list) if port_list else "None"
+                
+                # Add this host to the message
+                body += f"<li><b>{ip}</b> - Ports: {ports_str}</li>\n"
+                
+            body += "</ul>\n"
+        
+        # Add changes information if available
+        if changes and isinstance(changes, dict):
+            body += "<h3>Port Monitoring Alert</h3>\n"
+            body += "<p>The following changes were detected in the latest scan:</p>\n"
+            
+            # New Open Ports
+            if changes.get('new_ports') and any(changes.get('new_ports', {}).values()):
+                body += "<h4>New Open Ports:</h4>\n<ul>\n"
+                sorted_ips = sorted(changes.get('new_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('new_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        body += f"<li><b>{ip}</b> - Ports: {ports_str}</li>\n"
+                        
+                body += "</ul>\n"
+            else:
+                body += "<h4>New Open Ports:</h4>\n<ul>\n<li>None</li>\n</ul>\n"
+            
+            # Closed Ports
+            if changes.get('closed_ports') and any(changes.get('closed_ports', {}).values()):
+                body += "<h4>Closed Ports:</h4>\n<ul>\n"
+                sorted_ips = sorted(changes.get('closed_ports', {}).keys(), 
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
+                
+                for ip in sorted_ips:
+                    ports = changes.get('closed_ports', {}).get(ip, {})
+                    if ports:
+                        port_list = sorted(ports.keys(), key=lambda p: int(p.split('/')[0]))
+                        ports_str = ", ".join(port_list)
+                        body += f"<li><b>{ip}</b> - Ports: {ports_str}</li>\n"
+                        
+                body += "</ul>\n"
+            else:
+                body += "<h4>Closed Ports:</h4>\n<ul>\n<li>None</li>\n</ul>\n"
+        
+        body += "</body></html>"
+        
         return self._send_email(subject, body, html=True)
     
     def notify_ip_scan_started(self, ip: str, scan_id: str) -> bool:
