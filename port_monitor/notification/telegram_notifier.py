@@ -164,7 +164,24 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         if not self.is_enabled():
             return False
             
+        # Enhanced debugging
         logging.debug("Sending scan completion Telegram notification with details")
+        
+        # Log scan_results details if available
+        if scan_results:
+            logging.info(f"TelegramNotifier received scan_results with keys: {', '.join(scan_results.keys())}")
+            if 'hosts' in scan_results:
+                host_count = len(scan_results.get('hosts', {}))
+                logging.info(f"TelegramNotifier received information for {host_count} hosts")
+                
+                # Log details of each host
+                for ip, host_data in scan_results.get('hosts', {}).items():
+                    port_count = len(host_data.get('ports', {}))
+                    logging.info(f"TelegramNotifier host {ip} has {port_count} open ports")
+            else:
+                logging.warning("TelegramNotifier: No 'hosts' key in scan_results")
+        else:
+            logging.warning("TelegramNotifier: No scan_results provided")
         
         status = "✅ Successfully" if success else "❌ With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0

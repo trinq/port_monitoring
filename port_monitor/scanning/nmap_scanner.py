@@ -252,8 +252,29 @@ class NmapScanner(BaseScanner):
         if not individual_results:
             logging.error("No individual IP scans were successful")
             return None
+        
+        # Let's save all the scan data for each IP in memory to build a comprehensive combined XML file
+        all_hosts_data = []
+        for ip, xml_file, _ in individual_results:
+            try:
+                logging.info(f"Processing XML file {xml_file} for IP {ip}")
+                # Parse the individual XML file to extract all information
+                try:
+                    tree = ET.parse(xml_file)
+                    root = tree.getroot()
+                    # Extract host elements
+                    host_elements = root.findall('./host')
+                    if host_elements:
+                        logging.info(f"Found {len(host_elements)} host elements in {xml_file}")
+                        all_hosts_data.append((ip, host_elements[0]))
+                    else:
+                        logging.warning(f"No host elements found in {xml_file}")
+                except Exception as e:
+                    logging.error(f"Error parsing XML file {xml_file}: {e}")
+            except Exception as e:
+                logging.error(f"Error processing file {xml_file} for IP {ip}: {e}")
             
-        # Create combined XML output (very basic merge implementation)
+        # Create combined XML output with all parsed data
         with open(final_xml_output, 'w') as f:
             f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
             f.write('<!DOCTYPE nmaprun>\n')
@@ -263,19 +284,15 @@ class NmapScanner(BaseScanner):
             f.write('  <verbose level="0"/>\n')
             f.write('  <debugging level="0"/>\n')
             
-            # Extract host elements from each individual scan
-            for ip, xml_file, _ in individual_results:
+            # Include all host elements that we've extracted and parsed
+            for ip, host_element in all_hosts_data:
                 try:
-                    with open(xml_file, 'r') as host_file:
-                        content = host_file.read()
-                        # Extract the <host>...</host> section (very simple approach, might need improvement)
-                        host_start = content.find('<host')
-                        host_end = content.find('</host>', host_start) + 7
-                        if host_start > 0 and host_end > 0:
-                            host_section = content[host_start:host_end]
-                            f.write(f'  {host_section}\n')
+                    # Convert the host element to string
+                    host_xml = ET.tostring(host_element, encoding='unicode')
+                    f.write(f'  {host_xml}\n')
+                    logging.info(f"Added host data for IP {ip} to combined XML")
                 except Exception as e:
-                    logging.error(f"Error extracting host data from {xml_file}: {e}")
+                    logging.error(f"Error adding host data for IP {ip} to combined XML: {e}")
             
             # Close the root element
             f.write('  <runstats>\n')

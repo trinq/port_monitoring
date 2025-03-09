@@ -125,7 +125,8 @@ class TeamsNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         }
         return self._send_teams_message(card)
     
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> bool:
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                              scan_results=None, changes=None) -> bool:
         """Send Teams notification about scan completion"""
         status = "Successfully" if success else "With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0

@@ -119,7 +119,8 @@ class EmailNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         """
         return self._send_email(subject, body, html=True)
     
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> bool:
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                              scan_results=None, changes=None) -> bool:
         """Send email notification about scan completion"""
         subject = f"[PORT MONITOR] Scan Completed - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
         

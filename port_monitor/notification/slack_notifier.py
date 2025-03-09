@@ -116,7 +116,8 @@ class SlackNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         ]
         return self._send_slack_message(blocks)
     
-    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int) -> bool:
+    def notify_scan_completed(self, scan_id: str, success: bool, scanned: int, total: int, 
+                              scan_results=None, changes=None) -> bool:
         """Send Slack notification about scan completion"""
         status = ":white_check_mark: Successfully" if success else ":x: With Errors"
         percentage = (scanned / total) * 100 if total > 0 else 0

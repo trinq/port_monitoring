@@ -128,10 +128,22 @@ class PortMonitor:
             # Send scan completed notification with detailed results
             try:
                 # Get current scan results for detailed notification
-                scan_results = scan_result_file  # This is the path to the combined XML file
+                xml_file_path = scan_result_file  # This is the path to the combined XML file
                 
                 # Parse results for notification details
-                current_results = self.result_parser.parse_xml(scan_results)
+                current_results = self.result_parser.parse_xml(xml_file_path)
+                
+                # Add detailed debug logging
+                if current_results:
+                    logging.info(f"Parsed scan results successfully: {scan_results}")
+                    if 'hosts' in current_results:
+                        logging.info(f"Number of hosts in scan results: {len(current_results['hosts'])}")
+                        for ip, host_data in current_results.get('hosts', {}).items():
+                            logging.info(f"Host details for {ip}: {len(host_data.get('ports', {}))} open ports")
+                    else:
+                        logging.warning("No 'hosts' key found in scan results")
+                else:
+                    logging.error("Failed to parse scan results for notification")
                 
                 # Get changes (if any)
                 previous_scan_file = self._get_latest_history_file()
@@ -147,6 +159,10 @@ class PortMonitor:
                 self.notification_manager.notify_scan_completed(
                     scan_id, success, target_ips, target_ips, 
                     scan_results=current_results, changes=changes)
+                    
+                # Log the key information for debugging
+                logging.info(f"Sending completion notification with data: scan_id={scan_id}, success={success}, "
+                             f"targets={target_ips}, scan_results keys={current_results.keys() if current_results else 'None'}")
                     
             except Exception as e:
                 logging.error(f"Error sending scan completion notification: {e}", exc_info=True)
