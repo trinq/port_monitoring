@@ -20,8 +20,30 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 
-# Get the telegram_notifier module directly
-from port_monitor.notification.telegram_notifier import TelegramNotifier
+try:
+    # First try to import from the port_monitor package
+    from port_monitor.notification.telegram_notifier import TelegramNotifier
+    from port_monitor.config.configuration import ConfigManager
+except ImportError:
+    # If that fails, try direct import (for testing in the same directory)
+    sys.path.insert(0, current_dir)
+    from notification.telegram_notifier import TelegramNotifier
+    # Create a simple ConfigManager-like class
+    class ConfigManager:
+        def __init__(self, config):
+            self.config = config
+        
+        def get(self, section, option, fallback=''):
+            try:
+                return self.config.get(section, option)
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                return fallback
+                
+        def getboolean(self, section, option, fallback=False):
+            try:
+                return self.config.getboolean(section, option)
+            except (configparser.NoSectionError, configparser.NoOptionError):
+                return fallback
 
 def create_test_scan_data():
     """Create test data for notification testing"""
@@ -132,7 +154,7 @@ def create_test_scan_data():
 
 def main():
     # Read the config file
-    config = configparser.ConfigParser()
+    config_parser = configparser.ConfigParser()
     config_file = os.path.join(current_dir, 'port_monitor.conf')
     if not os.path.exists(config_file):
         config_file = os.path.join(parent_dir, 'port_monitor.conf')
@@ -141,11 +163,19 @@ def main():
         logging.error(f"Configuration file not found at {config_file}")
         return False
         
-    config.read(config_file)
+    config_parser.read(config_file)
     logging.info(f"Read configuration from {config_file}")
     
     # Create scan data
     scan_results, changes = create_test_scan_data()
+    
+    # Create the config manager or wrapper
+    try:
+        # Try to use the real ConfigManager
+        config = ConfigManager(config_file)
+    except Exception:
+        # Fall back to our simple wrapper
+        config = ConfigManager(config_parser)
     
     # Create the Telegram notifier
     telegram_notifier = TelegramNotifier(config)
@@ -156,9 +186,17 @@ def main():
         logging.info("Make sure 'enabled = true' is set in the [Telegram] section")
         return False
     
+    # Get the bot token and chat ID using the internal methods
+    bot_token = telegram_notifier._get_bot_token()
+    chat_id = telegram_notifier._get_chat_id()
+    
+    if not bot_token or not chat_id:
+        logging.error("Telegram bot token or chat ID is missing in the configuration")
+        return False
+    
     logging.info("Telegram notifier is enabled")
-    logging.info(f"Bot token: {telegram_notifier.bot_token[:4]}...{telegram_notifier.bot_token[-4:] if len(telegram_notifier.bot_token) > 8 else ''}")
-    logging.info(f"Chat ID: {telegram_notifier.chat_id}")
+    logging.info(f"Bot token: {bot_token[:4]}...{bot_token[-4:] if len(bot_token) > 8 else ''}")
+    logging.info(f"Chat ID: {chat_id}")
     
     # Generate a scan ID
     scan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
