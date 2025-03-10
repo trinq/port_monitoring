@@ -1,30 +1,31 @@
 #!/usr/bin/env python3
+"""
+Simple direct test script for the Telegram notifier's scan completion notification.
+"""
+
 import os
 import sys
-import json
 import logging
 import configparser
 from datetime import datetime
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 
-# Import directly from local directories
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Fix import paths - add parent directory to path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+sys.path.insert(0, parent_dir)
 
-# Import only the TelegramNotifier to avoid dependency issues
+# Get the telegram_notifier module directly
 from port_monitor.notification.telegram_notifier import TelegramNotifier
 
-def load_config(config_file='port_monitor.conf'):
-    """Load configuration from the specified file"""
-    config = configparser.ConfigParser()
-    config.read(config_file)
-    return config
-
-def create_test_data():
+def create_test_scan_data():
     """Create test data for notification testing"""
-    # Sample scan results with a mix of different port formats
+    # Sample scan results with ports in different formats
     scan_results = {
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'hosts': {
@@ -46,17 +47,9 @@ def create_test_data():
                             'product': 'nginx',
                             'version': '1.18.0'
                         }
-                    },
-                    '443/tcp': {
-                        'state': 'open',
-                        'service': {
-                            'name': 'https',
-                            'product': 'nginx',
-                            'version': '1.18.0'
-                        }
                     }
                 },
-                'port_count': 3
+                'port_count': 2
             },
             '10.0.0.1': {
                 'status': 'up',
@@ -103,12 +96,12 @@ def create_test_data():
         },
         'new_ports': {
             '192.168.1.1': {
-                '8080/tcp': {
+                '443/tcp': {
                     'state': 'open',
                     'service': {
-                        'name': 'http-proxy',
-                        'product': '',
-                        'version': ''
+                        'name': 'https',
+                        'product': 'nginx',
+                        'version': '1.18.0'
                     }
                 }
             }
@@ -123,7 +116,7 @@ def create_test_data():
                         'version': ''
                     }
                 },
-                'all/udp': {  # Another special case to test handling
+                'all/udp': {  # Another special case
                     'state': 'closed',
                     'service': {
                         'name': 'unknown',
@@ -138,56 +131,65 @@ def create_test_data():
     return scan_results, changes
 
 def main():
-    """Main function to test the Telegram notification"""
-    # Load the configuration
-    config = load_config()
-    
-    # Create test data
-    scan_results, changes = create_test_data()
-    
-    # Create Telegram notifier directly
-    if not config.has_section('Telegram'):
-        logging.error("No Telegram section found in the config file")
-        return
+    # Read the config file
+    config = configparser.ConfigParser()
+    config_file = os.path.join(current_dir, 'port_monitor.conf')
+    if not os.path.exists(config_file):
+        config_file = os.path.join(parent_dir, 'port_monitor.conf')
         
-    if not config.getboolean('Telegram', 'enabled', fallback=False):
-        logging.warning("Telegram notifications are disabled in the config")
-        return
+    if not os.path.exists(config_file):
+        logging.error(f"Configuration file not found at {config_file}")
+        return False
         
-    bot_token = config.get('Telegram', 'bot_token', fallback='')
-    chat_id = config.get('Telegram', 'chat_id', fallback='')
+    config.read(config_file)
+    logging.info(f"Read configuration from {config_file}")
     
-    if not bot_token or not chat_id:
-        logging.error("Missing Telegram configuration (bot_token or chat_id)")
-        return
-        
+    # Create scan data
+    scan_results, changes = create_test_scan_data()
+    
+    # Create the Telegram notifier
     telegram_notifier = TelegramNotifier(config)
     
+    # Check if Telegram is enabled
+    if not telegram_notifier.is_enabled():
+        logging.error("Telegram notifications are not enabled in the configuration")
+        logging.info("Make sure 'enabled = true' is set in the [Telegram] section")
+        return False
+    
     logging.info("Telegram notifier is enabled")
-    logging.info(f"Bot token: {bot_token[:4]}...{bot_token[-4:] if len(bot_token) > 8 else ''}")
-    logging.info(f"Chat ID: {chat_id}")
+    logging.info(f"Bot token: {telegram_notifier.bot_token[:4]}...{telegram_notifier.bot_token[-4:] if len(telegram_notifier.bot_token) > 8 else ''}")
+    logging.info(f"Chat ID: {telegram_notifier.chat_id}")
     
     # Generate a scan ID
     scan_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     # Test the scan completion notification
     try:
-        logging.info("Testing scan completion notification")
+        logging.info("Sending test scan completion notification...")
         success = telegram_notifier.notify_scan_completed(
             scan_id=scan_id,
             success=True,
-            scanned=2,
-            total=2,
+            scanned=3,
+            total=3,
             scan_results=scan_results,
             changes=changes
         )
         
         if success:
-            logging.info("Telegram notification sent successfully")
+            logging.info("✅ Telegram notification sent successfully")
         else:
-            logging.error("Failed to send Telegram notification")
+            logging.error("❌ Failed to send Telegram notification")
+            
+        return success
     except Exception as e:
-        logging.error(f"Error sending Telegram notification: {e}", exc_info=True)
+        logging.error(f"❌ Error sending Telegram notification: {e}", exc_info=True)
+        return False
 
 if __name__ == "__main__":
-    main()
+    result = main()
+    if result:
+        print("\n✅ Test completed successfully. Check your Telegram for the notification.")
+    else:
+        print("\n❌ Test failed. Please check the error messages above.")
+    
+    sys.exit(0 if result else 1)
