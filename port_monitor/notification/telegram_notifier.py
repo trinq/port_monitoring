@@ -169,17 +169,20 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         
         # Log scan_results details if available
         if scan_results:
-            logging.info(f"TelegramNotifier received scan_results with keys: {', '.join(scan_results.keys())}")
-            if 'hosts' in scan_results:
-                host_count = len(scan_results.get('hosts', {}))
-                logging.info(f"TelegramNotifier received information for {host_count} hosts")
-                
-                # Log details of each host
-                for ip, host_data in scan_results.get('hosts', {}).items():
-                    port_count = len(host_data.get('ports', {}))
-                    logging.info(f"TelegramNotifier host {ip} has {port_count} open ports")
+            if isinstance(scan_results, dict):
+                logging.info(f"TelegramNotifier received scan_results with keys: {', '.join(scan_results.keys())}")
+                if 'hosts' in scan_results:
+                    host_count = len(scan_results.get('hosts', {}))
+                    logging.info(f"TelegramNotifier received information for {host_count} hosts")
+                    
+                    # Log details of each host
+                    for ip, host_data in scan_results.get('hosts', {}).items():
+                        port_count = len(host_data.get('ports', {}))
+                        logging.info(f"TelegramNotifier host {ip} has {port_count} open ports")
+                else:
+                    logging.warning("TelegramNotifier: No 'hosts' key in scan_results")
             else:
-                logging.warning("TelegramNotifier: No 'hosts' key in scan_results")
+                logging.warning(f"TelegramNotifier: scan_results is not a dictionary, it's a {type(scan_results)}.")
         else:
             logging.warning("TelegramNotifier: No scan_results provided")
         
@@ -194,50 +197,14 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         message += f"<b>Completion Time:</b> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
         
         # Add summary port information for all hosts in a compact format
-        if scan_results and scan_results.get('hosts'):
+        if scan_results and isinstance(scan_results, dict) and scan_results.get('hosts'):
             message += "\n<b>📊 Port Monitoring Summary</b>\n"
             message += "\n<b>All Scanned Hosts:</b>\n"
             
             # Sort IPs numerically for better readability
-            sorted_ips = sorted(scan_results.get('hosts', {}).keys(), 
-                               key=lambda ip: [int(octet) for octet in ip.split('.')])
-            
-            for ip in sorted_ips:
-                host_data = scan_results.get('hosts', {}).get(ip, {})
-                ports = host_data.get('ports', {})
-                
-                # Format the ports list in a compact format
-                port_list = []
-                if ports:
-                    # Add safer port sorting that can handle non-numeric port values
-                    def safe_port_sort(port_str):
-                        try:
-                            # Handle standard port/protocol format
-                            return int(port_str.split('/')[0])
-                        except (ValueError, IndexError):
-                            # Return a high number for non-standard formats to put them at the end
-                            return 999999
-                    
-                    sorted_ports = sorted(ports.keys(), key=safe_port_sort)
-                    port_list = sorted_ports
-                
-                # Create a compact representation of the ports
-                ports_str = ", ".join(port_list) if port_list else ""
-                
-                # Add this host to the message
-                message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
-        
-        # Add changes information if available
-        # First, ensure changes is a dictionary before trying to access it
-        if changes and isinstance(changes, dict):
-            message += "\n<b>Port Monitoring Alert</b>\n"
-            message += "The following changes were detected in the latest scan:\n"
-            
-            # New Hosts Detected section
-            if scan_results and scan_results.get('hosts'):
-                message += "\n<b>New Hosts Detected:</b>\n"
+            try:
                 sorted_ips = sorted(scan_results.get('hosts', {}).keys(), 
-                                   key=lambda ip: [int(octet) for octet in ip.split('.')])
+                                  key=lambda ip: [int(octet) for octet in ip.split('.')])
                 
                 for ip in sorted_ips:
                     host_data = scan_results.get('hosts', {}).get(ip, {})
@@ -249,8 +216,12 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                         # Add safer port sorting that can handle non-numeric port values
                         def safe_port_sort(port_str):
                             try:
-                                # Handle standard port/protocol format
-                                return int(port_str.split('/')[0])
+                                # Extract port number from string like "80/tcp"
+                                port_num = port_str.split('/')[0]
+                                if port_num.isdigit():
+                                    return int(port_num)
+                                # Handle special case 'all'
+                                return 999999
                             except (ValueError, IndexError):
                                 # Return a high number for non-standard formats to put them at the end
                                 return 999999
@@ -263,52 +234,121 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
                     
                     # Add this host to the message
                     message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+            except Exception as e:
+                logging.error(f"Error formatting IP summary: {e}")
+                message += "• Error formatting host summary\n"
+        
+        # Add changes information if available
+        # First, ensure changes is a dictionary before trying to access it
+        if changes and isinstance(changes, dict):
+            message += "\n<b>Port Monitoring Alert</b>\n"
+            message += "The following changes were detected in the latest scan:\n"
+            
+            # New Hosts Detected section
+            if changes.get('new_hosts') and isinstance(changes.get('new_hosts'), dict):
+                message += "\n<b>New Hosts Detected:</b>\n"
+                try:
+                    sorted_ips = sorted(changes.get('new_hosts', {}).keys(), 
+                                       key=lambda ip: [int(octet) for octet in ip.split('.')])
+                    
+                    if sorted_ips:
+                        for ip in sorted_ips:
+                            host_data = changes.get('new_hosts', {}).get(ip, {})
+                            ports = host_data.get('ports', {})
+                            
+                            # Format the ports list in a compact format
+                            port_list = []
+                            if ports:
+                                # Add safer port sorting that can handle non-numeric port values
+                                def safe_port_sort(port_str):
+                                    try:
+                                        # Extract port number from string like "80/tcp"
+                                        port_num = port_str.split('/')[0]
+                                        if port_num.isdigit():
+                                            return int(port_num)
+                                        # Handle special case 'all'
+                                        return 999999
+                                    except (ValueError, IndexError):
+                                        # Return a high number for non-standard formats to put them at the end
+                                        return 999999
+                                
+                                sorted_ports = sorted(ports.keys(), key=safe_port_sort)
+                                port_list = sorted_ports
+                            
+                            # Create a compact representation of the ports
+                            ports_str = ", ".join(port_list) if port_list else ""
+                            
+                            # Add this host to the message
+                            message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+                    else:
+                        message += "• None\n"
+                except Exception as e:
+                    logging.error(f"Error formatting new hosts section: {e}")
+                    message += "• Error formatting new hosts section\n"
+            else:
+                message += "\n<b>New Hosts Detected:</b>\n• None\n"
             
             # New Open Ports
-            if changes.get('new_ports') and any(changes.get('new_ports', {}).values()):
+            if changes.get('new_ports') and isinstance(changes.get('new_ports'), dict) and any(changes.get('new_ports', {}).values()):
                 message += "\n<b>New Open Ports:</b>\n"
-                sorted_ips = sorted(changes.get('new_ports', {}).keys(), 
-                                   key=lambda ip: [int(octet) for octet in ip.split('.')])
-                
-                for ip in sorted_ips:
-                    ports = changes.get('new_ports', {}).get(ip, {})
-                    if ports:
-                        # Add safer port sorting that can handle non-numeric port values
-                        def safe_port_sort(port_str):
-                            try:
-                                # Handle standard port/protocol format
-                                return int(port_str.split('/')[0])
-                            except (ValueError, IndexError):
-                                # Return a high number for non-standard formats to put them at the end
-                                return 999999
-                        
-                        port_list = sorted(ports.keys(), key=safe_port_sort)
-                        ports_str = ", ".join(port_list)
-                        message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+                try:
+                    sorted_ips = sorted(changes.get('new_ports', {}).keys(), 
+                                       key=lambda ip: [int(octet) for octet in ip.split('.')])
+                    
+                    for ip in sorted_ips:
+                        ports = changes.get('new_ports', {}).get(ip, {})
+                        if ports:
+                            # Add safer port sorting that can handle non-numeric port values
+                            def safe_port_sort(port_str):
+                                try:
+                                    # Extract port number from string like "80/tcp"
+                                    port_num = port_str.split('/')[0]
+                                    if port_num.isdigit():
+                                        return int(port_num)
+                                    # Handle special case 'all'
+                                    return 999999
+                                except (ValueError, IndexError):
+                                    # Return a high number for non-standard formats to put them at the end
+                                    return 999999
+                            
+                            port_list = sorted(ports.keys(), key=safe_port_sort)
+                            ports_str = ", ".join(port_list)
+                            message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+                except Exception as e:
+                    logging.error(f"Error formatting new ports section: {e}")
+                    message += "• Error formatting new ports section\n"
             else:
                 message += "\n<b>New Open Ports:</b>\n• None\n"
             
             # Closed Ports
-            if changes.get('closed_ports') and any(changes.get('closed_ports', {}).values()):
+            if changes.get('closed_ports') and isinstance(changes.get('closed_ports'), dict) and any(changes.get('closed_ports', {}).values()):
                 message += "\n<b>Closed Ports:</b>\n"
-                sorted_ips = sorted(changes.get('closed_ports', {}).keys(), 
-                                   key=lambda ip: [int(octet) for octet in ip.split('.')])
-                
-                for ip in sorted_ips:
-                    ports = changes.get('closed_ports', {}).get(ip, {})
-                    if ports:
-                        # Add safer port sorting that can handle non-numeric port values
-                        def safe_port_sort(port_str):
-                            try:
-                                # Handle standard port/protocol format
-                                return int(port_str.split('/')[0])
-                            except (ValueError, IndexError):
-                                # Return a high number for non-standard formats to put them at the end
-                                return 999999
-                        
-                        port_list = sorted(ports.keys(), key=safe_port_sort)
-                        ports_str = ", ".join(port_list)
-                        message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+                try:
+                    sorted_ips = sorted(changes.get('closed_ports', {}).keys(), 
+                                       key=lambda ip: [int(octet) for octet in ip.split('.')])
+                    
+                    for ip in sorted_ips:
+                        ports = changes.get('closed_ports', {}).get(ip, {})
+                        if ports:
+                            # Add safer port sorting that can handle non-numeric port values
+                            def safe_port_sort(port_str):
+                                try:
+                                    # Extract port number from string like "80/tcp"
+                                    port_num = port_str.split('/')[0]
+                                    if port_num.isdigit():
+                                        return int(port_num)
+                                    # Handle special case 'all'
+                                    return 999999
+                                except (ValueError, IndexError):
+                                    # Return a high number for non-standard formats to put them at the end
+                                    return 999999
+                            
+                            port_list = sorted(ports.keys(), key=safe_port_sort)
+                            ports_str = ", ".join(port_list)
+                            message += f"• <b>{ip}</b> - Ports: {ports_str}\n"
+                except Exception as e:
+                    logging.error(f"Error formatting closed ports section: {e}")
+                    message += "• Error formatting closed ports section\n"
             else:
                 message += "\n<b>Closed Ports:</b>\n• None\n"
         
