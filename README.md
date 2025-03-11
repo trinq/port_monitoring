@@ -1,27 +1,23 @@
-# Port Monitoring System
+# 🔍 Port Monitoring System
 
-## Overview
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.6+-blue.svg)](https://www.python.org/downloads/)
+[![Code Style](https://img.shields.io/badge/code%20style-black-black)](https://github.com/psf/black)
+[![Contributions](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-The Port Monitoring System is a comprehensive solution for continuous monitoring of network ports across multiple IP addresses. It automatically detects changes in port status, including new open ports and closed ports, and sends notifications through multiple channels (Email, Slack, Teams, and Telegram).
+A comprehensive solution for continuous monitoring of network ports across multiple IP addresses. Automatically detects changes in port status and sends notifications through multiple channels (Email, Slack, Teams, and Telegram).
 
-## Quick Start
+## 📋 Table of Contents
 
-1. **Install Dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+* [Overview](#overview)
+* [Features](#features)
+* [Installation](#installation)
+* [Quick Start](#quick-start)
+* [Configuration](#configuration-file-port_monitorconf)
+* [Command Line Options](#command-line-options)
+* [Running as a Service](#running-as-a-service)
 
-2. **Configure the System**:
-   - Copy `port_monitor.conf.example` to `port_monitor.conf`
-   - Edit the configuration file with your settings
-   - Create an IP list file (default: `unique_ips.txt`)
-
-3. **Run the Monitor**:
-   ```bash
-   python -m port_monitor
-   ```
-
-## Features
+## ✨ Features
 
 - **Continuous Port Scanning**: Automatically scans IP addresses at configurable intervals
 - **Change Detection**: Identifies new hosts, new open ports, and closed ports
@@ -30,7 +26,25 @@ The Port Monitoring System is a comprehensive solution for continuous monitoring
 - **Sequential Scanning**: Scans IPs one by one to avoid network congestion
 - **Robust Error Handling**: Includes retry mechanisms and detailed logging
 
-## Configuration File (port_monitor.conf)
+## 🔧 Installation
+
+```bash
+pip install -r requirements.txt
+```
+
+## 🚀 Quick Start
+
+1. **Configure the System**:
+   - Copy `port_monitor.conf.example` to `port_monitor.conf`
+   - Edit the configuration file with your settings
+   - Create an IP list file (default: `unique_ips.txt`)
+
+2. **Run the Monitor**:
+   ```bash
+   python -m port_monitor
+   ```
+
+## ⚙️ Configuration File (port_monitor.conf)
 
 The system is configured through a single configuration file with the following sections:
 
@@ -143,7 +157,7 @@ chat_id = YOUR_CHAT_ID
 max_retries = 3
 ```
 
-## Command Line Options
+## 💻 Command Line Options
 
 The system supports various command line options:
 
@@ -161,9 +175,9 @@ Options:
   -h, --help              Show this help message
 ```
 
-## Running as a Service
+## 🔄 Running as a Service
 
-### Using Systemd (Linux)
+### 🐧 Using Systemd (Linux)
 
 1. Create a systemd service file:
    ```bash
@@ -192,7 +206,7 @@ Options:
    sudo systemctl start port-monitor.service
    ```
 
-### Using Cron
+### ⏱️ Using Cron
 
 1. Edit your crontab:
    ```bash
