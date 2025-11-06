@@ -49,6 +49,69 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         for char in special_chars:
             text = text.replace(char, f'\\{char}')
         return text
+
+    def _format_service_details(self, service: Dict[str, Any], port: str) -> str:
+        """Format comprehensive service details for display"""
+        parts = []
+
+        # Service name and product
+        name = service.get('name', 'unknown')
+        product = service.get('product', '')
+        version = service.get('version', '')
+
+        if product and version:
+            service_str = f"{name}: <b>{product} {version}</b>"
+        elif product:
+            service_str = f"{name}: <b>{product}</b>"
+        elif version:
+            service_str = f"{name} <b>{version}</b>"
+        else:
+            service_str = f"{name}"
+
+        parts.append(service_str)
+
+        # Add OS type if available
+        ostype = service.get('ostype', '')
+        if ostype:
+            parts.append(f"OS: {ostype}")
+
+        # Add extra info if available and useful
+        extrainfo = service.get('extrainfo', '')
+        if extrainfo and len(extrainfo) < 50:
+            parts.append(f"({extrainfo})")
+
+        # Add HTTP title for web services
+        http_title = service.get('http_title', '')
+        if http_title:
+            # Clean up the title
+            title_clean = http_title.replace('\n', ' ').strip()
+            if len(title_clean) > 60:
+                title_clean = title_clean[:57] + '...'
+            parts.append(f"📄 {title_clean}")
+
+        # Add HTTP server header
+        http_server = service.get('http_server', '')
+        if http_server and not product:  # Only show if we don't have product info
+            parts.append(f"Server: {http_server}")
+
+        # Add banner for non-HTTP services (truncated)
+        banner = service.get('banner', '')
+        if banner and 'http' not in name.lower():
+            banner_clean = banner.replace('\n', ' ').strip()
+            if len(banner_clean) > 50:
+                banner_clean = banner_clean[:47] + '...'
+            parts.append(f"Banner: {banner_clean}")
+
+        # Add CPE if available (for future CVE matching)
+        cpe_list = service.get('cpe', [])
+        if cpe_list and len(cpe_list) > 0:
+            # Show first CPE only, truncated
+            cpe = cpe_list[0]
+            if len(cpe) > 60:
+                cpe = cpe[:57] + '...'
+            parts.append(f"🔍 CPE: <code>{cpe}</code>")
+
+        return ' | '.join(parts)
     
     def _send_telegram_message(self, message: str) -> bool:
         """Send a message to Telegram chat"""
@@ -117,8 +180,8 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         if changes["new_ports"]:
             for host, ports in changes["new_ports"].items():
                 for port, service in ports.items():
-                    service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}"
-                    message += f"• {host}:{port} - {service_str}\n"
+                    service_details = self._format_service_details(service, port)
+                    message += f"• {host}:{port}\n  {service_details}\n"
         else:
             message += "<i>No new open ports detected</i>\n"
         
@@ -426,8 +489,8 @@ class TelegramNotifier(ChangeNotifier, ScanNotifier, IPScanNotifier):
         message += "<b>Open Ports:</b>\n"
         if scan_data.get('ports', {}) and scan_data.get('port_count', 0) > 0:
             for port, service in scan_data.get('ports', {}).items():
-                service_str = f"{service.get('name', 'unknown')} {service.get('product', '')} {service.get('version', '')}".strip()
-                message += f"• {port} - {service_str}\n"
+                service_details = self._format_service_details(service, port)
+                message += f"• <b>{port}</b>\n  {service_details}\n"
         else:
             message += "<i>No open ports detected</i>\n"
         

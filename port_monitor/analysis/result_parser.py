@@ -60,31 +60,67 @@ class ResultParser:
                     port_id = port.get('portid')
                     protocol = port.get('protocol')
                     port_key = f"{port_id}/{protocol}"
-                    
+
                     # Get state
                     state_elem = port.find('./state')
                     if state_elem is None:
                         continue
-                        
+
                     state = state_elem.get('state')
                     if state != 'open':
                         continue
-                    
-                    # Get service info
+
+                    # Get service info with comprehensive details
                     service_info = {
                         'state': state,
                         'reason': state_elem.get('reason', ''),
                     }
-                    
+
                     service_elem = port.find('./service')
                     if service_elem is not None:
                         service_info.update({
                             'name': service_elem.get('name', ''),
                             'product': service_elem.get('product', ''),
                             'version': service_elem.get('version', ''),
-                            'extrainfo': service_elem.get('extrainfo', '')
+                            'extrainfo': service_elem.get('extrainfo', ''),
+                            'ostype': service_elem.get('ostype', ''),
+                            'method': service_elem.get('method', ''),
+                            'conf': service_elem.get('conf', ''),  # Confidence level
+                            'devicetype': service_elem.get('devicetype', ''),
+                            'hostname': service_elem.get('hostname', ''),
                         })
-                    
+
+                        # Extract CPE (Common Platform Enumeration) for vulnerability matching
+                        cpe_list = []
+                        for cpe_elem in service_elem.findall('./cpe'):
+                            if cpe_elem.text:
+                                cpe_list.append(cpe_elem.text)
+                        if cpe_list:
+                            service_info['cpe'] = cpe_list
+
+                    # Extract script outputs (banner, http-title, ssl-cert, etc.)
+                    scripts = {}
+                    for script_elem in port.findall('./script'):
+                        script_id = script_elem.get('id', '')
+                        script_output = script_elem.get('output', '')
+
+                        if script_id and script_output:
+                            scripts[script_id] = script_output
+
+                            # Parse specific useful scripts
+                            if script_id == 'banner':
+                                service_info['banner'] = script_output.strip()
+                            elif script_id == 'http-title':
+                                service_info['http_title'] = script_output.strip()
+                            elif script_id == 'http-server-header':
+                                service_info['http_server'] = script_output.strip()
+                            elif script_id == 'ssl-cert':
+                                # Extract basic SSL cert info from output
+                                service_info['ssl_cert_info'] = script_output.strip()[:200]  # First 200 chars
+
+                    if scripts:
+                        service_info['scripts'] = scripts
+
                     results[ip]['ports'][port_key] = service_info
                 
                 # Count open ports

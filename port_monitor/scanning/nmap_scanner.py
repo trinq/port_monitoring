@@ -84,21 +84,37 @@ class NmapScanner(BaseScanner):
                 
                 # Create nmap command for this IP
                 ports = self.config.get('Scan', 'ports', fallback='22,80,443,3389,8080')
+
+                # Get timing template from config
+                timing_template = self.config.get('Scan', 'timing_template', fallback='3')
+                scan_delay = self.config.get('Scan', 'scan_delay', fallback='0.5s')
+                max_rate = self.config.get('Scan', 'max_rate', fallback='100')
+
+                # Check if we should use aggressive service detection
+                aggressive_detection = self.config.getboolean('Scan', 'aggressive_service_detection', fallback=True)
+
                 cmd = [
                     'nmap',
-                    '-sS',                 # SYN scan
-                    '-sV',                 # Version detection
-                    '-T4',                 # Timing template (higher is faster)
-                    '-Pn',                 # Skip host discovery
-                    '-n',                  # No DNS resolution
-                    '--scan-delay', '0.5s',  # Add delay between probes
-                    '--max-rate', '100',   # Maximum number of packets sent per second
-                    '--randomize-hosts',   # Randomize target host order
-                    '-p', ports,           # Port specification
-                    '-oX', ip_xml_output,  # XML output
-                    '-oN', ip_txt_output,  # Normal output
-                    '-iL', ip_list_temp    # Input from list
+                    '-sS',                      # SYN scan
+                    '-sV',                      # Version detection
+                    '--version-intensity', '7' if aggressive_detection else '5',  # More aggressive version detection
+                    f'-T{timing_template}',     # Timing template
+                    '-Pn',                      # Skip host discovery
+                    '-n',                       # No DNS resolution
+                    '--scan-delay', scan_delay, # Delay between probes
+                    '--max-rate', max_rate,     # Maximum packets per second
+                    '--randomize-hosts',        # Randomize target host order
+                    '-p', ports,                # Port specification
+                    '-oX', ip_xml_output,       # XML output
+                    '-oN', ip_txt_output,       # Normal output
+                    '-iL', ip_list_temp         # Input from list
                 ]
+
+                # Add script scanning for banner grabbing and service details
+                if self.config.getboolean('Scan', 'enable_scripts', fallback=True):
+                    cmd.extend([
+                        '--script', 'banner,http-server-header,http-title,ssh-hostkey,ssl-cert,tls-nextprotoneg'
+                    ])
                 
                 # Run scan with retry logic for this IP
                 success = False
@@ -181,25 +197,58 @@ class NmapScanner(BaseScanner):
                                     port_id = port_elem.get('portid')
                                     protocol = port_elem.get('protocol')
                                     port_key = f"{port_id}/{protocol}"
-                                    
+
                                     # Check if port is open
                                     state_elem = port_elem.find('./state')
                                     if state_elem is not None and state_elem.get('state') == 'open':
-                                        # Get service info
+                                        # Get comprehensive service info
                                         service_info = {
                                             'state': 'open',
                                             'reason': state_elem.get('reason', ''),
                                         }
-                                        
+
                                         service_elem = port_elem.find('./service')
                                         if service_elem is not None:
                                             service_info.update({
                                                 'name': service_elem.get('name', ''),
                                                 'product': service_elem.get('product', ''),
                                                 'version': service_elem.get('version', ''),
-                                                'extrainfo': service_elem.get('extrainfo', '')
+                                                'extrainfo': service_elem.get('extrainfo', ''),
+                                                'ostype': service_elem.get('ostype', ''),
+                                                'method': service_elem.get('method', ''),
+                                                'conf': service_elem.get('conf', ''),
+                                                'devicetype': service_elem.get('devicetype', ''),
+                                                'hostname': service_elem.get('hostname', ''),
                                             })
-                                        
+
+                                            # Extract CPE
+                                            cpe_list = []
+                                            for cpe_elem in service_elem.findall('./cpe'):
+                                                if cpe_elem.text:
+                                                    cpe_list.append(cpe_elem.text)
+                                            if cpe_list:
+                                                service_info['cpe'] = cpe_list
+
+                                        # Extract script outputs
+                                        scripts = {}
+                                        for script_elem in port_elem.findall('./script'):
+                                            script_id = script_elem.get('id', '')
+                                            script_output = script_elem.get('output', '')
+
+                                            if script_id and script_output:
+                                                scripts[script_id] = script_output
+                                                if script_id == 'banner':
+                                                    service_info['banner'] = script_output.strip()
+                                                elif script_id == 'http-title':
+                                                    service_info['http_title'] = script_output.strip()
+                                                elif script_id == 'http-server-header':
+                                                    service_info['http_server'] = script_output.strip()
+                                                elif script_id == 'ssl-cert':
+                                                    service_info['ssl_cert_info'] = script_output.strip()[:200]
+
+                                        if scripts:
+                                            service_info['scripts'] = scripts
+
                                         ports_dict[port_key] = service_info
                                         logging.debug(f"Found open port {port_key}: {service_info}")
                                 
@@ -285,25 +334,58 @@ class NmapScanner(BaseScanner):
                             port_id = port_elem.get('portid')
                             protocol = port_elem.get('protocol')
                             port_key = f"{port_id}/{protocol}"
-                            
+
                             # Check if port is open
                             state_elem = port_elem.find('./state')
                             if state_elem is not None and state_elem.get('state') == 'open':
-                                # Get service info
+                                # Get comprehensive service info
                                 service_info = {
                                     'state': 'open',
                                     'reason': state_elem.get('reason', ''),
                                 }
-                                
+
                                 service_elem = port_elem.find('./service')
                                 if service_elem is not None:
                                     service_info.update({
                                         'name': service_elem.get('name', ''),
                                         'product': service_elem.get('product', ''),
                                         'version': service_elem.get('version', ''),
-                                        'extrainfo': service_elem.get('extrainfo', '')
+                                        'extrainfo': service_elem.get('extrainfo', ''),
+                                        'ostype': service_elem.get('ostype', ''),
+                                        'method': service_elem.get('method', ''),
+                                        'conf': service_elem.get('conf', ''),
+                                        'devicetype': service_elem.get('devicetype', ''),
+                                        'hostname': service_elem.get('hostname', ''),
                                     })
-                                
+
+                                    # Extract CPE
+                                    cpe_list = []
+                                    for cpe_elem in service_elem.findall('./cpe'):
+                                        if cpe_elem.text:
+                                            cpe_list.append(cpe_elem.text)
+                                    if cpe_list:
+                                        service_info['cpe'] = cpe_list
+
+                                # Extract script outputs
+                                scripts = {}
+                                for script_elem in port_elem.findall('./script'):
+                                    script_id = script_elem.get('id', '')
+                                    script_output = script_elem.get('output', '')
+
+                                    if script_id and script_output:
+                                        scripts[script_id] = script_output
+                                        if script_id == 'banner':
+                                            service_info['banner'] = script_output.strip()
+                                        elif script_id == 'http-title':
+                                            service_info['http_title'] = script_output.strip()
+                                        elif script_id == 'http-server-header':
+                                            service_info['http_server'] = script_output.strip()
+                                        elif script_id == 'ssl-cert':
+                                            service_info['ssl_cert_info'] = script_output.strip()[:200]
+
+                                if scripts:
+                                    service_info['scripts'] = scripts
+
                                 ports_dict[port_key] = service_info
                         
                         # Save structured data for this host
@@ -636,23 +718,43 @@ class NmapScanner(BaseScanner):
     def _create_nmap_command(self, xml_output: str, normal_output: str) -> List[str]:
         """Create the nmap command with appropriate arguments"""
         ip_list_file = self.config.get_ip_list_file()
-        
+
+        # Get timing template from config
+        timing_template = self.config.get('Scan', 'timing_template', fallback='3')
+        scan_delay = self.config.get('Scan', 'scan_delay', fallback='0.5s')
+        max_rate = self.config.get('Scan', 'max_rate', fallback='100')
+
+        # Check if we should use aggressive service detection
+        aggressive_detection = self.config.getboolean('Scan', 'aggressive_service_detection', fallback=True)
+
         cmd = [
-            "nmap", "-sS", "-sV", "-T4", "-Pn", "-n",
-            "--scan-delay", self.config.get('Scan', 'scan_delay', fallback='0.5s'),
-            "--max-rate", self.config.get('Scan', 'max_rate', fallback='100'),
-            "--randomize-hosts",
+            "nmap",
+            "-sS",                       # SYN scan
+            "-sV",                       # Version detection
+            "--version-intensity", "7" if aggressive_detection else "5",  # More aggressive version detection
+            f"-T{timing_template}",      # Timing template
+            "-Pn",                       # Skip host discovery
+            "-n",                        # No DNS resolution
+            "--scan-delay", scan_delay,  # Delay between probes
+            "--max-rate", max_rate,      # Maximum packets per second
+            "--randomize-hosts",         # Randomize target host order
         ]
-        
+
         # Add custom ports if specified
         ports = self.config.get('Scan', 'ports', fallback='')
         if ports:
             cmd.extend(["-p", ports])
-        
+
+        # Add script scanning for banner grabbing and service details
+        if self.config.getboolean('Scan', 'enable_scripts', fallback=True):
+            cmd.extend([
+                '--script', 'banner,http-server-header,http-title,ssh-hostkey,ssl-cert,tls-nextprotoneg'
+            ])
+
         # Add output options
         cmd.extend(["-oX", xml_output, "-oN", normal_output])
-        
+
         # Add target IPs from file
         cmd.extend(["-iL", ip_list_file])
-        
+
         return cmd
