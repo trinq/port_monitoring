@@ -45,6 +45,10 @@ port_monitor_output/
 test_*.txt
 scan_*.log
 
+# User configuration - IP lists
+unique_ips.txt
+*.ips
+
 # OS
 .DS_Store
 Thumbs.db
